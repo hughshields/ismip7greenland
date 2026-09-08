@@ -1,7 +1,11 @@
 function frontalforcing = interpISMIP7GreenlandOcn(md,model_name,scenario)
-%interpISMIP7GreenlandOcn - interpolate chosen ISMIP7 frontal forcing to model
+%interpISMIP7GreenlandOcn - interpolate ISMIP7 climate model forcing 
+%									 to prepare frontal forcings via recommended parameterization
 %
-%   Parameterization from Slater et al. 2020 https://tc.copernicus.org/articles/14/985/2020/
+%   Parameterization from Rignot et al. 2016:
+%							https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2016GL068784	
+%					  see also Slater et al. 2020:
+%							https://tc.copernicus.org/articles/14/985/2020/
 %
 %   Thermal forcing (tf) and subglacial discharge (sgd) are each stored as
 %   one NetCDF file per year; this function globs every file in the
@@ -65,7 +69,7 @@ if ~ismember(scenario, valid_scenarios)
 end
 
 % Directory structure: model/scenario/variable-type/version/*.nc, one file per year
-rootname = [path 'GrIS'  model_name '/' scenario];
+rootname = [path 'GrIS/'  model_name '/' scenario];
 
 switch model_name
 	case 'CESM2-WACCM'
@@ -110,8 +114,15 @@ y_n = [];
 time_days = zeros(0,1);            % days since 1900-1-1, common axis across years
 tf_list  = cell(1, nfiles);        % thermal forcing,       [x, y, time], deg C
 sgd_list = cell(1, nfiles);        % subglacial discharge,  [x, y, time], m^3 s^-1
+progress_msg = '';
 
 for f = 1:nfiles
+	% print the year being read, erasing the previous one in place
+	yr_str = regexp(tffiles(f).name, '(\d{4})\.nc$', 'match', 'once');
+	fprintf(repmat('\b', 1, length(progress_msg)));
+	progress_msg = sprintf('   -- year %s (%d/%d)', yr_str, f, nfiles);
+	fprintf('%s', progress_msg);
+
 	tfnc  = fullfile(tffiles(f).folder,  tffiles(f).name);
 	sgdnc = fullfile(sgdfiles(f).folder, sgdfiles(f).name);
 
@@ -141,6 +152,7 @@ for f = 1:nfiles
 			i, tffiles(f).name);
 	end
 end
+fprintf('\n');
 
 tf_data  = cat(3, tf_list{:});
 sgd_data = cat(3, sgd_list{:});
@@ -161,10 +173,10 @@ TF_matrix  = zeros(md.mesh.numberofvertices, nt); % deg C, per vertex per month
 SGD_matrix = zeros(md.mesh.numberofvertices, nt); % m^3 s^-1, per vertex per month (converted to m^3/day below)
 
 for i = 1:nt
-	TF_matrix(:, i) = InterpFromGridToMesh(x_n, y_n, tf_data(:, :, i)', ...
-		md.mesh.x, md.mesh.y, 0);
-	SGD_matrix(:, i) = InterpFromGridToMesh(x_n, y_n, sgd_data(:, :, i)', ...
-		md.mesh.x, md.mesh.y, 0);
+	TF_matrix(:, i) = InterpFromGrid(x_n, y_n, tf_data(:, :, i)', ...
+		md.mesh.x, md.mesh.y, 'linear');
+	SGD_matrix(:, i) = InterpFromGrid(x_n, y_n, sgd_data(:, :, i)', ...
+		md.mesh.x, md.mesh.y, 'linear');
 end
 
 TF_matrix  = max(0, TF_matrix);
@@ -223,8 +235,8 @@ xc = mean(md.mesh.x(md.mesh.elements), 2); % element centroid x, meters
 yc = mean(md.mesh.y(md.mesh.elements), 2); % element centroid y, meters
 
 % 'nearest' avoids blending basin labels into meaningless intermediate values
-frontalforcing.basin_id   = InterpFromGridToMesh(x_basin, y_basin, basin_data_remapped', ...
-	xc, yc, 0, 'nearest');
+frontalforcing.basin_id   = InterpFromGrid(x_basin, y_basin, basin_data_remapped', ...
+	xc, yc, 'nearest');
 frontalforcing.num_basins = num_basins;
 
 disp(sprintf('Info: forcings cover %d to %d (scenario: %s, model: %s)', ...
