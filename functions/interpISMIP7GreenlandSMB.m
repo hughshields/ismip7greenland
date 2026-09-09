@@ -92,9 +92,9 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 	% (Jan. 1960 - Dec. 1989, see Nowicki et al. 2020: https://tc.copernicus.org/articles/14/2331/2020/)
 	clim_start_year = 1960;
 	clim_end_year   = 1989;
-	disp(['   == Computing RACMO23p2 climatology (' num2str(clim_start_year) '-' num2str(clim_end_year) ')']);
+	disp(['   == Loading RACMO23p2 climatology (' num2str(clim_start_year) '-' num2str(clim_end_year) ')']);
 	smb_clim = interpRACMO23p2MonthlySMB(md.mesh.x, md.mesh.y, clim_start_year, clim_end_year);
-	smb_clim(smb_clim==-9999)=0;
+	smb_clim(isnan(smb_clim))=0;
 	for ii = 1:size(smb_clim,2)
 		pos0 = find(smb_clim(1:end-1,ii)==0);
 		pos = find(smb_clim(1:end-1,ii)~=0);
