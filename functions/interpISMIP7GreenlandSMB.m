@@ -79,7 +79,7 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 		years = start_end(1):start_end(2);
 		keep  = false(numel(smb_file), 1);
 		for i = 1:numel(smb_file)
-			yr_str = regexp(smb_file(i).name, '(\d{4})\.nc$', 'match', 'once');
+			yr_str = regexp(smb_file(i).name, '\d{4}(?=\.nc$)', 'match', 'once');
 			keep(i) = any(years == str2double(yr_str));
 		end
 		smb_file = smb_file(keep);
@@ -90,25 +90,41 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 
 	% Load RACMO24p1_ERA5 dataset
 	% Compute climatological mean value of SMB (Jan. 1995 - Dec. 2014 in Nowicki et al. (2020@TC))
-	smb_clim = interpRACMO23p2MonthlySMB(md.mesh.x, md.mesh.y, 1995, 2014);
+	clim_start_year = 1995;
+	clim_end_year   = 2014;
+	disp(['   == Computing RACMO23p2 climatology (' num2str(clim_start_year) '-' num2str(clim_end_year) ')']);
+	smb_clim = interpRACMO23p2MonthlySMB(md.mesh.x, md.mesh.y, clim_start_year, clim_end_year);
 	smb_clim(smb_clim==-9999)=0;
 	for ii = 1:size(smb_clim,2)
 		pos0 = find(smb_clim(1:end-1,ii)==0);
 		pos = find(smb_clim(1:end-1,ii)~=0);
 		smb_clim(pos0,ii) = griddata(md.mesh.x(pos),md.mesh.y(pos),smb_clim(pos,ii),md.mesh.x(pos0),md.mesh.y(pos0),'nearest');
 	end
-	disp('Computing climatological mean')
+	disp('   -- computing climatological mean');
 	smb_clim = mean(smb_clim(1:end-1,:),2); % climatological mean value (exclude timestamps)
 
 	% Load data from files
-	disp('   == loading SMB anomaly data');
+	% smb_file is already chronologically sorted, so the first/last give the year range
+	yr_first = regexp(smb_file{1},   '\d{4}(?=\.nc$)', 'match', 'once');
+	yr_last  = regexp(smb_file{end}, '\d{4}(?=\.nc$)', 'match', 'once');
+	disp(['   == Loading ISMIP7 SMB anomaly for ' modelname ' ' scenario ', ' ...
+		yr_first '-' yr_last]);
 	x_n = double(ncread(smb_file{1},'x'));
 	y_n = double(ncread(smb_file{1},'y'));	
 
 	temp_matrix_smb_anon = [];
 	temp_matrix_time= [];
+	progress_msg = '';
 	for i = 1:length(smb_file)
-		fprintf('    processing file %d/%d \r',i,length(smb_file));
+		% configure out starting year of current file.
+		[~, fname] = fileparts(smb_file{i});      % strip path and .nc
+		tok = strsplit(fname, '_');
+		temp_time_start = str2double(tok{end});
+
+		% print the year being read, erasing the previous one in place
+		fprintf(repmat('\b', 1, length(progress_msg)));
+		progress_msg = sprintf('   -- year %d (%d/%d)', temp_time_start, i, length(smb_file));
+		fprintf('%s', progress_msg);
 
 		%NOTE: unit for acabf in netcdf file: kg m-2 s-1
 		smb_data = double(ncread(smb_file{i},'acabf-anomaly')); % dimension = (x,y,time)
@@ -117,11 +133,6 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 		%Load time data
 		temp_time = double(ncread(smb_file{i},'time')); % time since year from current file...
 
-		% configure out starting year of current file.
-		[~, fname] = fileparts(smb_file{i});      % strip path and .nc
-		tok = strsplit(fname, '_');
-		temp_time_start = str2double(tok{end});
-		
 		% convert days in year decimal
 		%FIXME: standard calendar for time is 365 days in year (with noleap)?
 		temp_time = temp_time/365 + temp_time_start;
@@ -136,6 +147,7 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 			clear temp_smb_anon;
 		end
 	end
+	fprintf('\n');
 
 	clear smb_data x_n y_n;
 

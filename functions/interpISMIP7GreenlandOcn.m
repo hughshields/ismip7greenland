@@ -107,7 +107,12 @@ end
 % Load all years and concatenate into one multi-year time series
 % ---------------------------------------------------------------------
 nfiles = length(tffiles);
-disp(['   == Loading TF and SGD for ' model_name ' ' scenario ' (' num2str(nfiles) ' yearly files)']);
+
+% filenames are chronologically sorted, so the first/last give the year range
+yr_first = regexp(tffiles(1).name,   '\d{4}(?=\.nc$)', 'match', 'once');
+yr_last  = regexp(tffiles(end).name, '\d{4}(?=\.nc$)', 'match', 'once');
+disp(['   == Loading ISMIP7 ocean forcing (TF/SGD) for ' model_name ' ' scenario ', ' ...
+	yr_first '-' yr_last]);
 
 x_n = [];
 y_n = [];
@@ -118,7 +123,7 @@ progress_msg = '';
 
 for f = 1:nfiles
 	% print the year being read, erasing the previous one in place
-	yr_str = regexp(tffiles(f).name, '(\d{4})\.nc$', 'match', 'once');
+	yr_str = regexp(tffiles(f).name, '\d{4}(?=\.nc$)', 'match', 'once');
 	fprintf(repmat('\b', 1, length(progress_msg)));
 	progress_msg = sprintf('   -- year %s (%d/%d)', yr_str, f, nfiles);
 	fprintf('%s', progress_msg);
@@ -209,7 +214,7 @@ frontalforcing.subglacial_discharge(end, :) = time_decyear;
 % Basin IDs (one per mesh element), for grouping calving-front vertices
 % into discharge/melt basins
 % ---------------------------------------------------------------------
-disp('Reading basin data from NetCDF file...');
+disp('   == Reading basin data from NetCDF file');
 basin_file = [path 'tools/ismip7-gris-ocean-forcing/subglacial_discharge_basins_ismip.nc'];
 
 x_basin    = double(ncread(basin_file, 'x'));      % meters
@@ -223,7 +228,7 @@ end
 unique_basins = unique(basin_data(:));
 unique_basins(unique_basins == 0) = [];  % 0 = background / no basin
 num_basins = length(unique_basins);
-disp(['  Found ' num2str(num_basins) ' basins']);
+disp(['   -- found ' num2str(num_basins) ' basins']);
 
 % remap to contiguous 1..N labels in case the raster's raw ids aren't already
 basin_data_remapped = zeros(size(basin_data));
@@ -238,7 +243,4 @@ yc = mean(md.mesh.y(md.mesh.elements), 2); % element centroid y, meters
 frontalforcing.basin_id   = InterpFromGrid(x_basin, y_basin, basin_data_remapped', ...
 	xc, yc, 'nearest');
 frontalforcing.num_basins = num_basins;
-
-disp(sprintf('Info: forcings cover %d to %d (scenario: %s, model: %s)', ...
-	min(time_year), max(time_year), scenario, model_name));
 end

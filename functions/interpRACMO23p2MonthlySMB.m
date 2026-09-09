@@ -33,26 +33,40 @@ function [output] = interpRACMO23p2MonthlySMB(X,Y,t_start,t_end,ncpath),
 	filenames = {filestruct(:).name};
 	directories = {filestruct(:).folder};
 
+	% Identify up front which yearly files fall within the requested time
+	% range, so the progress line below can show "year (n/total)" the same
+	% way interpISMIP7GreenlandOcn does.
+	match_idx  = [];
+	match_year = {};
+	for ii = 1:length(filenames)
+		filename_split = split(filenames{ii}, '.');
+		if ~strcmp('smb_rec', filename_split{1})
+			continue
+		end
+		yr_str = filename_split{2};
+		if (str2double(yr_str) < floor(t_start)) || (str2double(yr_str) > t_end)
+			continue
+		end
+		match_idx(end+1)  = ii; %#ok<AGROW>
+		match_year{end+1} = yr_str; %#ok<AGROW>
+	end
+	nfiles = length(match_idx);
+
 	% Initialize output matrix
 	output = NaN(length(X)+1, 1);
 
 	count = 1;
-	for ii = 1:length(filenames)
-		% Extract information about the file
+	progress_msg = '';
+	for kk = 1:nfiles
+		ii       = match_idx(kk);
 		filename = filenames{ii};
-		filename_split = split(filename, '.');
+		yr_str   = match_year{kk};
+		yr_date  = datetime([yr_str '-01-01']);
 
-		if strcmp('smb_rec', filename_split{1})
-			yr_str = filename_split{2};
-			yr_date = datetime([yr_str '-01-01']);
-		else
-			continue
-		end
-
-		% If the file is not within the requested time range, skip it
-		if (str2double(yr_str) < floor(t_start)) || (str2double(yr_str) > t_end)
-			continue
-		end
+		% print the year being read, erasing the previous one in place
+		fprintf(repmat('\b', 1, length(progress_msg)));
+		progress_msg = sprintf('   -- year %s (%d/%d)', yr_str, kk, nfiles);
+		fprintf('%s', progress_msg);
 
 		% Load x and y data from netCDF file
 		% LAT and LON in this file are actually northing and easting in km
@@ -87,7 +101,6 @@ function [output] = interpRACMO23p2MonthlySMB(X,Y,t_start,t_end,ncpath),
 		daysinyear = 365 + leapyear(year(yr_date));
 
 		% Load SMB data
-		disp(['   -- RACMO23p2: reading smb for year ' yr_str]);
 		data = double(ncread([directories{ii} '/' filename],'smb_rec',[id1x id1y 1],[id2x-id1x+1 id2y-id1y+1 length(time)],[1 1 1]));
 		data(data <= -1.e+20) = NaN;
 
@@ -112,4 +125,5 @@ function [output] = interpRACMO23p2MonthlySMB(X,Y,t_start,t_end,ncpath),
 			count = count + 1;
 		end
 	end
+	fprintf('\n');
 end
