@@ -88,10 +88,10 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 	% Recover file names in cell.
 	smb_file = fullfile({smb_file.folder}, {smb_file.name});
 
-	% Load RACMO24p1_ERA5 dataset
-	% Compute climatological mean value of SMB (Jan. 1995 - Dec. 2014 in Nowicki et al. (2020@TC))
-	clim_start_year = 1995;
-	clim_end_year   = 2014;
+	% Load RACMO24p1_ERA5 dataset and compute climatological mean value of SMB 
+	% (Jan. 1960 - Dec. 1989, see Nowicki et al. 2020: https://tc.copernicus.org/articles/14/2331/2020/)
+	clim_start_year = 1960;
+	clim_end_year   = 1989;
 	disp(['   == Computing RACMO23p2 climatology (' num2str(clim_start_year) '-' num2str(clim_end_year) ')']);
 	smb_clim = interpRACMO23p2MonthlySMB(md.mesh.x, md.mesh.y, clim_start_year, clim_end_year);
 	smb_clim(smb_clim==-9999)=0;
