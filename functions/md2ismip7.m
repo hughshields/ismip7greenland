@@ -65,7 +65,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%floor(TransientSolution.time), so it assumes .time is in (absolute) calendar years;
 	%if your times are relative to the run start, pass time_range explicitly instead.
 	if nargin<11 || isempty(time_range),
-		ytmp = floor(arrayfun(@(k) md.results.TransientSolution(k).time, 1:numel(md.results.TransientSolution)));
+		%Subtract a tiny epsilon before floor(): a solution saved at EXACTLY an
+		%integer year (e.g. 2015.0) is the end-of-year instant for the PRECEDING
+		%year, not the start of a new one, but plain floor() would count it as a
+		%spurious extra year. Genuinely fractional times (e.g. 2014.99) are far
+		%enough from the boundary that this has no effect on them.
+		ytmp = floor(arrayfun(@(k) md.results.TransientSolution(k).time, 1:numel(md.results.TransientSolution))-1e-9);
 		if strcmp(experiment,'init'),
 			y0=ytmp(end); y1=ytmp(end);            %single snapshot: final stored year
 		else
@@ -92,11 +97,14 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%      in (absolute) decimal years - see the time-encoding note further below.
 	Nsol    = numel(md.results.TransientSolution);
 	alltime = arrayfun(@(k) md.results.TransientSolution(k).time, 1:Nsol);
+	%Subtract a tiny epsilon before floor(): see the note by the time_range
+	%derivation above - an exact year-boundary instant belongs to the year that
+	%is ending, not the one that is starting.
 	if strcmp(experiment,'init'),
-		uyears  = floor(alltime(end));   %single snapshot: treat it as its own "year"
+		uyears  = floor(alltime(end)-1e-9);   %single snapshot: treat it as its own "year"
 		yearidx = {Nsol};
 	else
-		years   = floor(alltime);
+		years   = floor(alltime-1e-9);
 		uyears  = unique(years);
 		yearidx = cell(1,numel(uyears));
 		for j=1:numel(uyears),
@@ -162,11 +170,27 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%      day values and the accompanying time bounds for the official submission.
 	days_since_1850 = @(yr) datenum(floor(yr),1,1) - datenum(1850,1,1) + (yr-floor(yr)).*(datenum(floor(yr)+1,1,1)-datenum(floor(yr),1,1));
 
-	%STATE time: actual model time of the end-of-year snapshot
-	tvec_state = arrayfun(@(k) md.results.TransientSolution(k).time, state_idx);
-	time_state = days_since_1850(tvec_state);
+	%STATE time: EXACT end-of-year instant (Jan 1 of the year after the nominal
+	%year), per the ISMIP7 ST convention. NOTE: this is deliberately NOT the raw
+	%model save time - ISSM's last solution of a year is typically saved a few
+	%days before the exact year boundary, which the compliance checker treats as
+	%a different (wrong) nominal year rather than a rounding error.
+	%(for the 'init' single-snapshot case there is no calendar-year boundary to
+	%snap to, so the raw model time is used as-is.)
+	if strcmp(experiment,'init'),
+		tvec_state = arrayfun(@(k) md.results.TransientSolution(k).time, state_idx);
+		time_state = days_since_1850(tvec_state);
+	else
+		time_state = zeros(1,nyears);
+		for j=1:nyears,
+			time_state(j) = datenum(uyears(j)+1,1,1) - datenum(1850,1,1);   %Jan 1 of year+1
+		end
+	end
 
-	%FLUX time: middle of the calendar year, with bounds spanning the whole year.
+	%FLUX time: EXACTLY July 1 of the calendar year (the ISMIP7 FL convention),
+	%with bounds spanning the whole year. NOTE: this is deliberately not a
+	%computed (start+end)/2 midpoint - that lands on Jul 2 in a non-leap year
+	%because 365 days split in half rounds past Jul 1, which the checker flags.
 	%(for the 'init' single-snapshot case there is no averaging period, so the
 	%flux time collapses to the same instant used for the state variables.)
 	if strcmp(experiment,'init'),
@@ -180,7 +204,7 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			b0 = datenum(yr,1,1)  -datenum(1850,1,1);   %start of the year
 			b1 = datenum(yr+1,1,1)-datenum(1850,1,1);   %end of the year (=start of next year)
 			time_flux_bnds(:,j) = [b0;b1];
-			time_flux(j)        = (b0+b1)/2;             %middle of the year
+			time_flux(j)        = datenum(yr,7,1)-datenum(1850,1,1);   %exactly Jul 1
 		end
 	end
 
@@ -254,16 +278,17 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	end
 
 	%Parameters for InterpFromMeshToGrid (index,x,y,data,xgrid,ygrid,default_value).
-	%The interpolated grid starts at (xmin,ymax) and steps down in y, so the stored
-	%arrays are ordered (x, y-descending); the y coordinate variable is written to match.
+	%Both x and y are ascending: the compliance checker computes grid resolution
+	%as coord(2)-coord(1) and only accepts positive values, so a descending axis
+	%(negative resolution) fails that check even though the data itself is fine.
 	xmin   = results.gridx(1);
 	ymax   = results.gridy(end);
 	ncols  = numel(results.gridx);
 	nlines = numel(results.gridy);
 	xgrid  = results.gridx;                      %x grid values (ascending)
-	ygrid  = results.gridy(end:-1:1);            %y grid values (descending from ymax)
+	ygrid  = results.gridy;                      %y grid values (ascending)
 	results.xcoord = results.gridx;              %x coordinate variable (ascending)
-	results.ycoord = results.gridy(end:-1:1);    %y coordinate variable (descending, matches data)
+	results.ycoord = results.gridy;              %y coordinate variable (ascending, matches data)
 
 	if strcmp(icesheetname,'GrIS'),
 		results.thickness= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
@@ -490,12 +515,34 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	results.sftgrf = results.groundedice .* icepresent;  %grounded fraction, 0 outside ice
 	results.sftflf = results.floatingice .* icepresent;  %floating fraction, 0 outside ice
 
-	%STATE grid time: end-of-year snapshot (actual model time)
-	tvec_grid_state = arrayfun(@(k) md.results.TransientSolution(k).time, results.timegrid);
-	time_grid_state = days_since_1850(tvec_grid_state);
+	%Data-request fill policies the generic NaN handling in write_gridded_var
+	%doesn't know about:
+	%  - 'no_ice' (xvelmean, yvelmean, strbasemag): must be FILL outside the ice
+	%    mask. The ISSM mesh can extend slightly beyond the ice extent (bare rock
+	%    margins), so InterpFromMeshToGrid returns real, non-NaN values there;
+	%    force those back to NaN so write_gridded_var converts them to fill.
+	results.vxmean(icepresent==0) = NaN;
+	results.vymean(icepresent==0) = NaN;
+	results.drag(icepresent==0)   = NaN;
 
-	%FLUX grid time: middle of each output period, with bounds spanning its start
-	%to its end (a single calendar year when output_interval_yr==1).
+	%STATE grid time: EXACT end-of-year instant (Jan 1 of the year after the last
+	%calendar year in each output period), per the ST convention - see the note
+	%by the scalar STATE time above for why this isn't the raw model save time.
+	if strcmp(experiment,'init'),
+		tvec_grid_state = arrayfun(@(k) md.results.TransientSolution(k).time, results.timegrid);
+		time_grid_state = days_since_1850(tvec_grid_state);
+	else
+		time_grid_state = zeros(1,noutput);
+		for j=1:noutput,
+			time_grid_state(j) = datenum(block_y1(j)+1,1,1) - datenum(1850,1,1);
+		end
+	end
+
+	%FLUX grid time: EXACTLY July 1 for a single-calendar-year output period (the
+	%FL convention - see the scalar FLUX time note above); for a multi-year period
+	%(output_interval_yr>1) there is no single "Jul 1" to snap to, so the true
+	%midpoint of the period is used instead. Bounds always span the period's start
+	%to its end.
 	if strcmp(experiment,'init'),
 		time_grid_flux      = time_grid_state;
 		time_grid_flux_bnds = [time_grid_state;time_grid_state];
@@ -506,7 +553,11 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			b0 = datenum(block_y0(j),1,1)  -datenum(1850,1,1);
 			b1 = datenum(block_y1(j)+1,1,1)-datenum(1850,1,1);
 			time_grid_flux_bnds(:,j) = [b0;b1];
-			time_grid_flux(j)        = (b0+b1)/2;
+			if block_y0(j)==block_y1(j),
+				time_grid_flux(j) = datenum(block_y0(j),7,1)-datenum(1850,1,1);   %exactly Jul 1
+			else
+				time_grid_flux(j) = (b0+b1)/2;                                    %multi-year: true midpoint
+			end
 		end
 	end
 
@@ -514,18 +565,22 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		'converter and are written as fill/NaN - populate before submission: libmassbfgr, ' ...
 		'licalvf, ligroundf, lifmassbf (gridded); tendlicalvf, tendlifmassbf, tendligroundf (scalar).']);
 
-	%Columns: variable_id, standard_name, units, data, is_mask, is_flux
+	%Columns: variable_id, standard_name, units, data, zero_outside_ice, is_flux
+	%  zero_outside_ice=true: data-request fill_policy is 'forbidden' - the
+	%    variable must be 0 (not fill) wherever there is no ice, so NaN there is
+	%    written as 0. Applies to the mask fractions themselves and to lithk /
+	%    dlithkdt (fill_policy=forbidden per the data request).
 	%  is_flux=false (ST): end-of-year snapshot, no time bounds
 	%  is_flux=true  (FL): yearly average at mid-year, with time bounds
 	grid_vars = {
-		'lithk',       'land_ice_thickness',                         'm',          results.thickness,   false, false;
+		'lithk',       'land_ice_thickness',                         'm',          results.thickness,   true,  false;
 		'orog',        'surface_altitude',                           'm',          results.surface,     false, false;
 		'topg',        'bedrock_altitude',                           'm',          results.bed,         false, false;
 		'base',        '',                                           'm',          results.base,        false, false;
 		'acabf',       'land_ice_surface_specific_mass_balance_flux','kg m-2 s-1', results.smb,         false, true;
 		'libmassbfgr', 'land_ice_basal_specific_mass_balance_flux',  'kg m-2 s-1', results.libmassbfgr, false, true;
 		'libmassbffl', 'land_ice_basal_specific_mass_balance_flux',  'kg m-2 s-1', results.bmb,         false, true;
-		'dlithkdt',    'tendency_of_land_ice_thickness',             'm s-1',      results.dhdt,        false, true;
+		'dlithkdt',    'tendency_of_land_ice_thickness',             'm s-1',      results.dhdt,        true,  true;
 		'xvelmean',    'land_ice_vertical_mean_x_velocity',          'm s-1',      results.vxmean,      false, false;
 		'yvelmean',    'land_ice_vertical_mean_y_velocity',          'm s-1',      results.vymean,      false, false;
 		'strbasemag',  'land_ice_basal_drag',                        'Pa',         results.drag,        false, false;
