@@ -65,12 +65,18 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%floor(TransientSolution.time), so it assumes .time is in (absolute) calendar years;
 	%if your times are relative to the run start, pass time_range explicitly instead.
 	if nargin<11 || isempty(time_range),
-		%Subtract a tiny epsilon before floor(): a solution saved at EXACTLY an
-		%integer year (e.g. 2015.0) is the end-of-year instant for the PRECEDING
-		%year, not the start of a new one, but plain floor() would count it as a
-		%spurious extra year. Genuinely fractional times (e.g. 2014.99) are far
-		%enough from the boundary that this has no effect on them.
-		ytmp = floor(arrayfun(@(k) md.results.TransientSolution(k).time, 1:numel(md.results.TransientSolution))-1e-9);
+		alltime_tmp = arrayfun(@(k) md.results.TransientSolution(k).time, 1:numel(md.results.TransientSolution));
+		ytmp = floor(alltime_tmp);
+		%If (and only if) the very LAST stored solution lands exactly on a year
+		%boundary (e.g. 2015.0), that instant is the end of the PRECEDING year,
+		%not the start of a new one, so pull it back a year. This must NOT be
+		%applied to every timestamp: an exact-integer FIRST timestep (e.g. an
+		%initial condition at 2007.0) legitimately belongs to that year, not the
+		%one before it - only the final point can be a "run just stopped here"
+		%boundary marker.
+		if numel(alltime_tmp)>1 && alltime_tmp(end)==floor(alltime_tmp(end)),
+			ytmp(end) = ytmp(end)-1;
+		end
 		if strcmp(experiment,'init'),
 			y0=ytmp(end); y1=ytmp(end);            %single snapshot: final stored year
 		else
@@ -97,14 +103,22 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%      in (absolute) decimal years - see the time-encoding note further below.
 	Nsol    = numel(md.results.TransientSolution);
 	alltime = arrayfun(@(k) md.results.TransientSolution(k).time, 1:Nsol);
-	%Subtract a tiny epsilon before floor(): see the note by the time_range
-	%derivation above - an exact year-boundary instant belongs to the year that
-	%is ending, not the one that is starting.
+	%See the note by the time_range derivation above: only the FINAL stored
+	%solution gets pulled back a year if it lands exactly on a boundary - an
+	%exact-integer instant elsewhere (e.g. an initial condition) is left alone.
 	if strcmp(experiment,'init'),
-		uyears  = floor(alltime(end)-1e-9);   %single snapshot: treat it as its own "year"
+		lastt = alltime(end);
+		if lastt==floor(lastt),
+			uyears = lastt-1;
+		else
+			uyears = floor(lastt);
+		end
 		yearidx = {Nsol};
 	else
-		years   = floor(alltime-1e-9);
+		years   = floor(alltime);
+		if numel(alltime)>1 && alltime(end)==floor(alltime(end)),
+			years(end) = years(end)-1;
+		end
 		uyears  = unique(years);
 		yearidx = cell(1,numel(uyears));
 		for j=1:numel(uyears),
