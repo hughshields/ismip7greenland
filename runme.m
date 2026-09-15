@@ -1,5 +1,4 @@
 steps=[7];
-% FIX: basal geothermal forcing in the projections
 %Run Options{{{
 
 % Cluster Options (for forward transients and inversions)
@@ -27,7 +26,7 @@ climate_model = climate_models{1}
 scenarios = {'ctrl', 'ssp370', 'ssp126', 'ssp585'};
 scenario = scenarios{1};
 % Folder to store models
-folder = 'Models';
+folder = 'models';
 
 addpath functions
 
@@ -125,8 +124,9 @@ if perform(org,['Greenland_ISMIP7Run_' climate_model '_Historical']),% {{{
 	md.toolkits.DefaultAnalysis=bcgslbjacobioptions();% biconjugate gradient with block Jacobi preconditioner
 	md.settings.solver_residue_threshold = 1.e-4;
 
-	% TODO: Do I need all these outputs? Like SmbMassBalance? and FrictionCoefficient? Most of the rest are scalars
-		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskIceLevelset','MaskOceanLevelset','FrictionCoefficient','SmbMassBalance','GroundedArea','FloatingArea','TotalSmb', 'CalvingCalvingrate','GroundinglineMassFlux'};
+	md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskIceLevelset','MaskOceanLevelset','SmbMassBalance','GroundedArea','FloatingArea','TotalSmb', 'IceVolumeScaled','IceVolumeAboveFloatationScaled','GroundedAreaScaled','FloatingAreaScaled','TotalSmbScaled', 'BasalStress', 'BasalforcingsGroundediceMeltingRate', 'TotalGroundedBmb','BasalforcingsFloatingiceMeltingRate','TotalFloatingBmb', 'GroundinglineMassFlux'};
+	
+	md.settings.outputfrequency = 10;
 
 	md.masstransport.stabilization = 2;
 
@@ -801,10 +801,10 @@ if perform(org,['Greenland_ISMIP7Run_CESM2-WACCM_SSP585_' int2str(projection_sta
 		md.calving.stress_threshold_groundedice = md.calving.stress_threshold_groundedice*1000;
 		md.calving.stress_threshold_floatingice = md.calving.stress_threshold_floatingice*1000;
 		
-		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskIceLevelset','MaskOceanLevelset','FrictionCoefficient','SmbMassBalance','GroundedArea','FloatingArea','TotalSmb', 'CalvingCalvingrate','GroundinglineMassFlux'};
+		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskIceLevelset','MaskOceanLevelset','SmbMassBalance','GroundedArea','FloatingArea','TotalSmb', 'IceVolumeScaled','IceVolumeAboveFloatationScaled','GroundedAreaScaled','FloatingAreaScaled','TotalSmbScaled', 'BasalStress', 'BasalforcingsGroundediceMeltingRate', 'TotalGroundedBmb','BasalforcingsFloatingiceMeltingRate','TotalFloatingBmb', 'CalvingFluxLevelset', 'TotalCalvingFluxLevelset', 'CalvingMeltingFluxLevelset', 'TotalCalvingMeltingFluxLevelset', 'GroundinglineMassFlux'};
 	else
 		md.transient.ismovingfront=0;
-		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskIceLevelset','MaskOceanLevelset','FrictionCoefficient','SmbMassBalance','GroundedArea','FloatingArea','TotalSmb', 'GroundinglineMassFlux'};
+		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskIceLevelset','MaskOceanLevelset','SmbMassBalance','GroundedArea','FloatingArea','TotalSmb', 'IceVolumeScaled','IceVolumeAboveFloatationScaled','GroundedAreaScaled','FloatingAreaScaled','TotalSmbScaled', 'BasalStress', 'BasalforcingsGroundediceMeltingRate', 'TotalGroundedBmb','BasalforcingsFloatingiceMeltingRate','TotalFloatingBmb', 'GroundinglineMassFlux'};
 	end
 
 	%Basal melt rate from https://tc.copernicus.org/articles/19/2695/2025/
