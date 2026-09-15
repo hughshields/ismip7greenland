@@ -17,8 +17,6 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%output_interval_yr: interval in years between 2-D (gridded) output snapshots
 	%                    (optional, default 1). Scalars are always annual.
 
-	experiment = experiment_id; %kept for the init single-snapshot branching below
-
 	if nargin<12 || isempty(resolution_km),
 		resolution_km=8; %default resolution valid for both GrIS and AIS
 	end
@@ -65,23 +63,13 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%floor(TransientSolution.time), so it assumes .time is in (absolute) calendar years;
 	%if your times are relative to the run start, pass time_range explicitly instead.
 	if nargin<11 || isempty(time_range),
-		alltime_tmp = arrayfun(@(k) md.results.TransientSolution(k).time, 1:numel(md.results.TransientSolution));
-		ytmp = floor(alltime_tmp);
-		%If (and only if) the very LAST stored solution lands exactly on a year
-		%boundary (e.g. 2015.0), that instant is the end of the PRECEDING year,
-		%not the start of a new one, so pull it back a year. This must NOT be
-		%applied to every timestamp: an exact-integer FIRST timestep (e.g. an
-		%initial condition at 2007.0) legitimately belongs to that year, not the
-		%one before it - only the final point can be a "run just stopped here"
-		%boundary marker.
-		if numel(alltime_tmp)>1 && alltime_tmp(end)==floor(alltime_tmp(end)),
-			ytmp(end) = ytmp(end)-1;
-		end
-		if strcmp(experiment,'init'),
-			y0=ytmp(end); y1=ytmp(end);            %single snapshot: final stored year
-		else
-			y0=min(ytmp); y1=max(ytmp);
-		end
+		%Drop the last stored solution before deriving the year range: it is the
+		%branch/handoff instant shared with whatever comes next (e.g. a historical
+		%run's array ending at exactly 2015.0 really just marks "as of Jan 1 2015",
+		%i.e. through end of 2014) rather than a genuine extra year of its own.
+		Nuse_tmp = max(numel(md.results.TransientSolution)-1,1);
+		ytmp = floor(arrayfun(@(k) md.results.TransientSolution(k).time, 1:Nuse_tmp));
+		y0=min(ytmp); y1=max(ytmp);
 		if y0==y1,
 			time_range=sprintf('%04d',y0);          %single year, e.g. 2014
 		else
@@ -101,29 +89,17 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%                      time bounds spanning the start to the end of that year
 	%NOTE: grouping is by floor(TransientSolution.time), so .time is assumed to be
 	%      in (absolute) decimal years - see the time-encoding note further below.
-	Nsol    = numel(md.results.TransientSolution);
+	%Drop the last stored solution before doing anything else - see the matching
+	%note by the time_range derivation above. Everything downstream (state_idx,
+	%yearidx, blockidx) derives from Nsol/alltime, so dropping it here keeps it
+	%out of every computation, not just out of the filename.
+	Nsol    = max(numel(md.results.TransientSolution)-1,1);
 	alltime = arrayfun(@(k) md.results.TransientSolution(k).time, 1:Nsol);
-	%See the note by the time_range derivation above: only the FINAL stored
-	%solution gets pulled back a year if it lands exactly on a boundary - an
-	%exact-integer instant elsewhere (e.g. an initial condition) is left alone.
-	if strcmp(experiment,'init'),
-		lastt = alltime(end);
-		if lastt==floor(lastt),
-			uyears = lastt-1;
-		else
-			uyears = floor(lastt);
-		end
-		yearidx = {Nsol};
-	else
-		years   = floor(alltime);
-		if numel(alltime)>1 && alltime(end)==floor(alltime(end)),
-			years(end) = years(end)-1;
-		end
-		uyears  = unique(years);
-		yearidx = cell(1,numel(uyears));
-		for j=1:numel(uyears),
-			yearidx{j} = find(years==uyears(j));   %all solutions in this calendar year
-		end
+	years   = floor(alltime);
+	uyears  = unique(years);
+	yearidx = cell(1,numel(uyears));
+	for j=1:numel(uyears),
+		yearidx{j} = find(years==uyears(j));   %all solutions in this calendar year
 	end
 	nyears = numel(uyears);
 
@@ -176,50 +152,33 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%ISMIP7 default netCDF4 f4 fill value
 	fillval = single(9.969209968386869e+36);
 
-	%Time coordinate in "days since 1850-01-01" (standard/Gregorian calendar).
-	%NOTE: this assumes md.results.TransientSolution(k).time holds ABSOLUTE calendar
-	%      years. If your model stores time relative to the run start, add the start
-	%      year (e.g. parsed from time_range) before conversion. The reference tool at
-	%      https://github.com/ismip/ismip7-time-encoding should be used to generate the
-	%      day values and the accompanying time bounds for the official submission.
-	days_since_1850 = @(yr) datenum(floor(yr),1,1) - datenum(1850,1,1) + (yr-floor(yr)).*(datenum(floor(yr)+1,1,1)-datenum(floor(yr),1,1));
+	%Time coordinate is "days since 1850-01-01" (standard/Gregorian calendar),
+	%computed below via datenum(...)-datenum(1850,1,1). The reference tool at
+	%https://github.com/ismip/ismip7-time-encoding should be used to generate
+	%the day values and the accompanying time bounds for the official submission.
 
 	%STATE time: EXACT end-of-year instant (Jan 1 of the year after the nominal
 	%year), per the ISMIP7 ST convention. NOTE: this is deliberately NOT the raw
 	%model save time - ISSM's last solution of a year is typically saved a few
 	%days before the exact year boundary, which the compliance checker treats as
 	%a different (wrong) nominal year rather than a rounding error.
-	%(for the 'init' single-snapshot case there is no calendar-year boundary to
-	%snap to, so the raw model time is used as-is.)
-	if strcmp(experiment,'init'),
-		tvec_state = arrayfun(@(k) md.results.TransientSolution(k).time, state_idx);
-		time_state = days_since_1850(tvec_state);
-	else
-		time_state = zeros(1,nyears);
-		for j=1:nyears,
-			time_state(j) = datenum(uyears(j)+1,1,1) - datenum(1850,1,1);   %Jan 1 of year+1
-		end
+	time_state = zeros(1,nyears);
+	for j=1:nyears,
+		time_state(j) = datenum(uyears(j)+1,1,1) - datenum(1850,1,1);   %Jan 1 of year+1
 	end
 
 	%FLUX time: EXACTLY July 1 of the calendar year (the ISMIP7 FL convention),
 	%with bounds spanning the whole year. NOTE: this is deliberately not a
 	%computed (start+end)/2 midpoint - that lands on Jul 2 in a non-leap year
 	%because 365 days split in half rounds past Jul 1, which the checker flags.
-	%(for the 'init' single-snapshot case there is no averaging period, so the
-	%flux time collapses to the same instant used for the state variables.)
-	if strcmp(experiment,'init'),
-		time_flux      = time_state;
-		time_flux_bnds = [time_state; time_state];
-	else
-		time_flux      = zeros(1,nyears);
-		time_flux_bnds = zeros(2,nyears);
-		for j=1:nyears,
-			yr = uyears(j);
-			b0 = datenum(yr,1,1)  -datenum(1850,1,1);   %start of the year
-			b1 = datenum(yr+1,1,1)-datenum(1850,1,1);   %end of the year (=start of next year)
-			time_flux_bnds(:,j) = [b0;b1];
-			time_flux(j)        = datenum(yr,7,1)-datenum(1850,1,1);   %exactly Jul 1
-		end
+	time_flux      = zeros(1,nyears);
+	time_flux_bnds = zeros(2,nyears);
+	for j=1:nyears,
+		yr = uyears(j);
+		b0 = datenum(yr,1,1)  -datenum(1850,1,1);   %start of the year
+		b1 = datenum(yr+1,1,1)-datenum(1850,1,1);   %end of the year (=start of next year)
+		time_flux_bnds(:,j) = [b0;b1];
+		time_flux(j)        = datenum(yr,7,1)-datenum(1850,1,1);   %exactly Jul 1
 	end
 
 	%One file per scalar variable (ISMIP7 requires a single main variable per file).
@@ -295,8 +254,6 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%Both x and y are ascending: the compliance checker computes grid resolution
 	%as coord(2)-coord(1) and only accepts positive values, so a descending axis
 	%(negative resolution) fails that check even though the data itself is fine.
-	xmin   = results.gridx(1);
-	ymax   = results.gridy(end);
 	ncols  = numel(results.gridx);
 	nlines = numel(results.gridy);
 	xgrid  = results.gridx;                      %x grid values (ascending)
@@ -314,10 +271,10 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		results.dhdt= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.vxsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.vysurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		%results.vzsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+		results.vzsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.vxbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.vybase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		%results.vzbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+		results.vzbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.vxmean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.vymean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 		results.surftemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
@@ -478,7 +435,10 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.vymean(:,:,i)=transpose(vymean)/md.constants.yts;
 			surftemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature,xgrid,ygrid,NaN);
 			results.surftemp(:,:,i)=transpose(surftemp);
-			basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature,xgrid,ygrid,NaN);
+			%AIS mesh has no vertical resolution, so there is no distinct basal
+			%temperature to interpolate (it would just duplicate surftemp, which is
+			%physically wrong) - left as a fill placeholder until a real basal
+			%temperature field is available for this domain.
 			basetemp=NaN*ones(nlines,ncols);
 			results.basetemp(:,:,i)=transpose(basetemp);
 			drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.friction.coefficient.^2*md.constants.g.*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base).*md.results.TransientSolution(results.timegrid(i)).Vel/md.constants.yts,xgrid,ygrid,NaN);
@@ -542,14 +502,9 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%STATE grid time: EXACT end-of-year instant (Jan 1 of the year after the last
 	%calendar year in each output period), per the ST convention - see the note
 	%by the scalar STATE time above for why this isn't the raw model save time.
-	if strcmp(experiment,'init'),
-		tvec_grid_state = arrayfun(@(k) md.results.TransientSolution(k).time, results.timegrid);
-		time_grid_state = days_since_1850(tvec_grid_state);
-	else
-		time_grid_state = zeros(1,noutput);
-		for j=1:noutput,
-			time_grid_state(j) = datenum(block_y1(j)+1,1,1) - datenum(1850,1,1);
-		end
+	time_grid_state = zeros(1,noutput);
+	for j=1:noutput,
+		time_grid_state(j) = datenum(block_y1(j)+1,1,1) - datenum(1850,1,1);
 	end
 
 	%FLUX grid time: EXACTLY July 1 for a single-calendar-year output period (the
@@ -557,21 +512,16 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%(output_interval_yr>1) there is no single "Jul 1" to snap to, so the true
 	%midpoint of the period is used instead. Bounds always span the period's start
 	%to its end.
-	if strcmp(experiment,'init'),
-		time_grid_flux      = time_grid_state;
-		time_grid_flux_bnds = [time_grid_state;time_grid_state];
-	else
-		time_grid_flux      = zeros(1,noutput);
-		time_grid_flux_bnds = zeros(2,noutput);
-		for j=1:noutput,
-			b0 = datenum(block_y0(j),1,1)  -datenum(1850,1,1);
-			b1 = datenum(block_y1(j)+1,1,1)-datenum(1850,1,1);
-			time_grid_flux_bnds(:,j) = [b0;b1];
-			if block_y0(j)==block_y1(j),
-				time_grid_flux(j) = datenum(block_y0(j),7,1)-datenum(1850,1,1);   %exactly Jul 1
-			else
-				time_grid_flux(j) = (b0+b1)/2;                                    %multi-year: true midpoint
-			end
+	time_grid_flux      = zeros(1,noutput);
+	time_grid_flux_bnds = zeros(2,noutput);
+	for j=1:noutput,
+		b0 = datenum(block_y0(j),1,1)  -datenum(1850,1,1);
+		b1 = datenum(block_y1(j)+1,1,1)-datenum(1850,1,1);
+		time_grid_flux_bnds(:,j) = [b0;b1];
+		if block_y0(j)==block_y1(j),
+			time_grid_flux(j) = datenum(block_y0(j),7,1)-datenum(1850,1,1);   %exactly Jul 1
+		else
+			time_grid_flux(j) = (b0+b1)/2;                                    %multi-year: true midpoint
 		end
 	end
 
