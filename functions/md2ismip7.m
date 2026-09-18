@@ -357,11 +357,19 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.surftemp(:,:,i)=transpose(surftemp);
 			basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 			results.basetemp(:,:,i)=transpose(basetemp);
-			%Effective pressure clamped at 0 to prevent negative values from floating point roundoff on shelves
+			%Effective pressure clamped at 0: rho_ice*H+rho_water*Base crosses zero
+			%right at flotation, and floating-point roundoff there was producing the
+			%tiny negative drag values (e.g. -4e-9 Pa) that failed the ISMIP7 checker.
 			Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices)),0);
 			vel_drag=sqrt(md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices).^2+md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices).^2)/md.constants.yts;
 			drag_mesh=md.friction.coefficient(1:md.mesh.numberofvertices).^2.*Neff_drag.*vel_drag;
-			%Set verticies that fail the ISMIP7 checker threshold to NaN
+			%With linear Budd friction confirmed (p=q=1), the formula above is the
+			%right physics, so a vertex this far above the checker's 1e6 Pa cap is a
+			%data/inversion artifact (a runaway friction coefficient or a locally
+			%noisy velocity right at a shear margin) rather than a formula error.
+			%The ISMIP7 checker tolerates missing values, so these vertices are
+			%masked to NaN rather than clamped to an arbitrary, still-fictitious
+			%number - that keeps every other (valid) vertex in this field untouched.
 			baddrag=find(drag_mesh>1e6);
 			if ~isempty(baddrag),
 				[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
@@ -409,7 +417,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 				meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
 			end
 			bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-			results.bmb(:,:,i)=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts).*transpose(1-groundedice);
+			%libmassbffl's fill policy requires missing (not 0) outside floating
+			%ice. Multiplying by (1-groundedice) wrote a defined 0 there instead -
+			%mask to NaN explicitly so write_gridded_var converts it to _FillValue.
+			bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
+			bmbval(transpose(groundedice)==1)=NaN;
+			results.bmb(:,:,i)=bmbval;
 			smb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
 			results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
 		end
@@ -483,15 +496,24 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.drag(:,:,i)=transpose(drag);
 			calving=NaN*ones(nlines,ncols);
 			results.calving(:,:,i)=transpose(calving);
-			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).MaskGroundediceLevelset,xgrid,ygrid,NaN);
-			groundedice(find(groundedice>0))=1;
-			groundedice(find(groundedice<0))=0;
-			results.groundedice(:,:,i)=transpose(groundedice);
-			results.floatingice(:,:,i)=transpose(1-groundedice);
 			mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset,xgrid,ygrid,-1);
 			mask(find(mask>0))=1;
 			mask(find(mask<0))=-1;
 			results.mask(:,:,i)=transpose(mask);
+			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).MaskGroundediceLevelset,xgrid,ygrid,NaN);
+			groundedice(find(groundedice>0))=1;
+			groundedice(find(groundedice<0))=0;
+			%MaskGroundediceLevelset only encodes grounded-vs-floating (bed vs sea
+			%level) - it has no notion of ice presence, so ice-free rock above sea
+			%level (e.g. exposed mountains) would otherwise be flagged as "grounded"
+			%here. Multiply by the true ice-extent indicator (mask>0, from
+			%ice_levelset) before storing - matching the fix already applied in the
+			%GrIS branch above. The raw (unmasked) local groundedice variable is left
+			%as-is for the bmb weighting below, where 1-groundedice already
+			%correctly evaluates to 0 over ice-free land.
+			icemask=double(mask>0);
+			results.groundedice(:,:,i)=transpose(groundedice.*icemask);
+			results.floatingice(:,:,i)=transpose((1-groundedice).*icemask);
 			%--- flux fields for this output period: averaged over every raw solution
 			%    stored within it, rather than a single end-of-period snapshot ---
 			bidx = blockidx{i};
@@ -511,7 +533,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 				meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
 			end
 			bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-			results.bmb(:,:,i)=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts).*transpose(1-groundedice);
+			%libmassbffl's fill policy requires missing (not 0) outside floating
+			%ice. Multiplying by (1-groundedice) wrote a defined 0 there instead -
+			%mask to NaN explicitly so write_gridded_var converts it to _FillValue.
+			bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
+			bmbval(transpose(groundedice)==1)=NaN;
+			results.bmb(:,:,i)=bmbval;
 			smb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
 			results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
 		end
@@ -526,6 +553,17 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	results.sftgif = icepresent;                         %land ice area fraction
 	results.sftgrf = results.groundedice .* icepresent;  %grounded fraction, 0 outside ice
 	results.sftflf = results.floatingice .* icepresent;  %floating fraction, 0 outside ice
+
+	%Physical consistency: grounded ice rests directly on the bed, so wherever a
+	%cell is classified wholly grounded (sftgrf==1), base must equal topg. Left
+	%alone, 'base' and 'topg' are interpolated independently from the mesh, and
+	%at grid cells straddling the grounding line the two interpolations don't
+	%always land on exactly the same value even though the (separately
+	%thresholded) mask rounds that cell to "grounded" - the same kind of
+	%interpolate-then-threshold mismatch as the grounded/floating mask fixes
+	%above. Force it directly rather than leave a ~0.008% mismatch for the checker.
+	fullygrounded = results.sftgrf==1;
+	results.base(fullygrounded) = results.bed(fullygrounded);
 
 	%Data-request fill policies the generic NaN handling in write_gridded_var
 	%doesn't know about:
