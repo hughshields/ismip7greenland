@@ -357,19 +357,11 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.surftemp(:,:,i)=transpose(surftemp);
 			basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 			results.basetemp(:,:,i)=transpose(basetemp);
-			%Effective pressure clamped at 0: rho_ice*H+rho_water*Base crosses zero
-			%right at flotation, and floating-point roundoff there was producing the
-			%tiny negative drag values (e.g. -4e-9 Pa) that failed the ISMIP7 checker.
+			%Effective pressure clamped at 0:right at flotation, floating-point roundoff produced negative values
 			Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices)),0);
 			vel_drag=sqrt(md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices).^2+md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices).^2)/md.constants.yts;
 			drag_mesh=md.friction.coefficient(1:md.mesh.numberofvertices).^2.*Neff_drag.*vel_drag;
-			%With linear Budd friction confirmed (p=q=1), the formula above is the
-			%right physics, so a vertex this far above the checker's 1e6 Pa cap is a
-			%data/inversion artifact (a runaway friction coefficient or a locally
-			%noisy velocity right at a shear margin) rather than a formula error.
-			%The ISMIP7 checker tolerates missing values, so these vertices are
-			%masked to NaN rather than clamped to an arbitrary, still-fictitious
-			%number - that keeps every other (valid) vertex in this field untouched.
+			% fill mesh points where drag fails checker with NaN
 			baddrag=find(drag_mesh>1e6);
 			if ~isempty(baddrag),
 				[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
