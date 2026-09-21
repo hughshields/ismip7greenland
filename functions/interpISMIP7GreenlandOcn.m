@@ -59,7 +59,7 @@ function frontalforcing = interpISMIP7GreenlandOcn(md,model_name,scenario)
 % ---------------------------------------------------------------------
 switch oshostname(),
 	case {'totten'}
-		path='/totten_1/ModelData/ISMIP7/';
+		path='/totten_1/ModelData/ISMIP7/ISMIP7/';
 	case {'epica'}
 		path='/data2/issm/shields/ismip7greenland/ModelData/ISMIP7/';
 	otherwise
