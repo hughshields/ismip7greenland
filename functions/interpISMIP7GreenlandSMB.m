@@ -34,7 +34,7 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 	% Find appropriate directory
 	switch oshostname(),
 		case {'totten'}
-			datadir='/totten_1/ModelData/ISMIP7/GrIS/';
+			datadir='/totten_1/ModelData/ISMIP7/ISMIP7/GrIS/';
 		case {'epica'}
 			datadir='/data2/issm/shields/ismip7greenland/ModelData/ISMIP7/GrIS/';
 		otherwise
@@ -95,11 +95,16 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 	disp(['   == Loading RACMO23p2 climatology (' num2str(clim_start_year) '-' num2str(clim_end_year) ')']);
 	smb_clim = interpRACMO23p2MonthlySMB(md.mesh.x, md.mesh.y, clim_start_year, clim_end_year);
 	smb_clim(isnan(smb_clim))=0;
-	for ii = 1:size(smb_clim,2)
-		pos0 = find(smb_clim(1:end-1,ii)==0);
-		pos = find(smb_clim(1:end-1,ii)~=0);
-		smb_clim(pos0,ii) = griddata(md.mesh.x(pos),md.mesh.y(pos),smb_clim(pos,ii),md.mesh.x(pos0),md.mesh.y(pos0),'nearest');
+
+	pos0 = find(smb_clim(1:end-1,1)==0);
+	pos  = find(smb_clim(1:end-1,1)~=0);
+	if ~isempty(pos0)
+		nearest_idx = dsearchn([md.mesh.x(pos), md.mesh.y(pos)], [md.mesh.x(pos0), md.mesh.y(pos0)]);
+		for ii = 1:size(smb_clim,2)
+			smb_clim(pos0,ii) = smb_clim(pos(nearest_idx),ii);
+		end
 	end
+	
 	disp('   -- computing climatological mean');
 	smb_clim = mean(smb_clim(1:end-1,:),2); % climatological mean value (exclude timestamps)
 
