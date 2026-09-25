@@ -286,6 +286,13 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	if ~has_vxavg,
 		warning('ISMIP7:novxavg','VxAverage/VyAverage not found in the solutions - using Vx/Vy directly for the grounding-line flux calculation (only correct for a depth-uniform/2D model).');
 	end
+	%Some setups leave md.basalforcings.geothermalflux as its uninitialized scalar NaN
+	%(or an all-NaN array) rather than a real per-vertex field - indexing that with
+	%(1:numberofvertices) errors outright. Treat a missing/all-NaN field as 0 instead.
+	geothermalflux_missing = all(isnan(md.basalforcings.geothermalflux(:)));
+	if geothermalflux_missing,
+		warning('ISMIP7:nogeoflux','md.basalforcings.geothermalflux is NaN - gridded geothermal flux (hfgeoubed) treated as 0.');
+	end
 	%ISMIP7 standard grids (ISMIP6 domains, EPSG:3413 for GrIS, EPSG:3031 for AIS).
 	%Allowed resolutions (multiples of 2 km): GrIS 1/2/4/8/16 km, AIS 2/4/8/16 km.
 	posting = resolution_km*1000;
@@ -384,7 +391,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.surface(:,:,i)=transpose(surface);
 			bed=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 			results.bed(:,:,i)=transpose(bed);
-			geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.basalforcings.geothermalflux(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+			if geothermalflux_missing,
+				geoflux_mesh = zeros(md.mesh.numberofvertices,1);
+			else
+				geoflux_mesh = md.basalforcings.geothermalflux(1:md.mesh.numberofvertices);
+			end
+			geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
 			results.geoflux(:,:,i)=transpose(geoflux);
 			if i==1,
 				dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.geometry.thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
@@ -524,7 +536,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.surface(:,:,i)=transpose(surface);
 			bed=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed,xgrid,ygrid,NaN);
 			results.bed(:,:,i)=transpose(bed);
-			geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.basalforcings.geothermalflux,xgrid,ygrid,NaN);
+			if geothermalflux_missing,
+				geoflux_mesh = zeros(md.mesh.numberofvertices,1);
+			else
+				geoflux_mesh = md.basalforcings.geothermalflux;
+			end
+			geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
 			results.geoflux(:,:,i)=transpose(geoflux);
 			if i==1,
 				dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness-md.geometry.thickness)/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
