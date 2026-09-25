@@ -192,10 +192,6 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
 
 	disp('   Prescribing SMB');
    md.smb = interpISMIP7GreenlandSMB(md, climate_model,scenario);
-	disp('   Removing unused SMB forcings');
-	t = md.smb.mass_balance(end, :);                       % time stamps
-	mask = (t >= projection_start_time) & (t < projection_end_time + 1);
-	md.smb.mass_balance = md.smb.mass_balance(:, mask);
 	
 	disp('   Prescribing basal melt rate');
 	%Basal melt rate from https://tc.copernicus.org/articles/19/2695/2025/
@@ -794,19 +790,23 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
 
 	savemodel(org,md);
 end%}}}
-if perform(org,['Greenland_ISMIP7Run_CESM2-WACCM_SSP585_' int2str(projection_start_time) '-' int2str(projection_end_time)]),% {{{
+if perform(org,['Greenland_ISMIP7Run_' climate_model '_' upper(scenario) '_' int2str(projection_start_time) '-' int2str(projection_end_time)]),% {{{
 
-	md=loadmodel(org,['Greenland_ISMIP7Prep_CESM2-WACCM_SSP585']);
+	md=loadmodel(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]);
 	
 	disp('   Updating start/end times');
-	md.timestepping=timesteppingadaptive();
-   md.timestepping.time_step_max=0.1;
-   md.timestepping.time_step_min=0.01;
+	md.timestepping.time_step=0.01;
    md.timestepping.start_time=projection_start_time;
    md.timestepping.final_time=projection_end_time;
 	md.settings.output_frequency=10;
+	
+	disp('   Removing unused SMB forcings');
+	t = md.smb.mass_balance(end, :);                       % time stamps
+	mask = (t >= projection_start_time) & (t < projection_end_time + 1);
+	md.smb.mass_balance = md.smb.mass_balance(:, mask);
 
-	md.verbose=verbose('all');
+	md.verbose.solution = true;
+	%md.verbose=verbose('all');
 
 	md.transient.requested_outputs={'default','IceVolume','IceVolumeScaled','IceVolumeAboveFloatation','IceVolumeAboveFloatationScaled','MaskIceLevelset','MaskOceanLevelset','SmbMassBalance','GroundedArea','GroundedAreaScaled','FloatingArea','FloatingAreaScaled','TotalSmb','TotalSmbScaled', 'BasalforcingsGroundediceMeltingRate', 'TotalGroundedBmb', 'TotalGroundedBmbScaled', 'BasalforcingsFloatingiceMeltingRate','TotalFloatingBmb', 'TotalFloatingBmbScaled', 'TotalCalvingFluxLevelset', 'TotalCalvingMeltingFluxLevelset','Calvingratex','Calvingratey','CalvingMeltingrate','GroundinglineMassFlux'};
 	
