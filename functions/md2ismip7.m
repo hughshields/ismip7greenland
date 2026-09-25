@@ -36,6 +36,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		error('experiment_id must be provided (e.g. historical, ctrl, ssp126)');
 	end
 
+	%Calving/ice-front-melt diagnostics are only physically meaningful when the
+	%front position is dynamically simulated. Historical runs in this workflow
+	%prescribe the front (observed extent imposed each year, no calving law
+	%active), so calving-derived outputs are left at fill value throughout.
+	is_historical = strcmpi(experiment_id,'historical');
+
 	%Allowed ISMIP7 resolutions (km): GrIS 1/2/4/8/16, AIS 2/4/8/16
 	if strcmp(icesheetname,'GrIS'),
 		allowed_res=[1 2 4 8 16];
@@ -111,27 +117,64 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	end
 
 	%--- state scalar diagnostics: instantaneous value at the end-of-year snapshot ---
+	%Using the *Scaled ISSM diagnostics (already in md.transient.requested_outputs): the
+	%unscaled versions count an element as fully in/out of the ice/grounded/floating
+	%domain (binary, whole-element), while Scaled weights each element by its actual
+	%fractional coverage - more accurate right at the ice margin/grounding line, where
+	%elements are often only partially covered.
 	results.mass         = zeros(1,nyears);
 	results.massaf        = zeros(1,nyears);
 	results.groundedarea  = zeros(1,nyears);
 	results.floatingarea  = zeros(1,nyears);
 	for i=1:nyears,
 		k=state_idx(i);
-		results.mass(i)        = md.results.TransientSolution(k).IceVolume*md.materials.rho_ice;
-		results.massaf(i)       = md.results.TransientSolution(k).IceVolumeAboveFloatation*md.materials.rho_ice;
-		results.groundedarea(i) = md.results.TransientSolution(k).GroundedArea;
-		results.floatingarea(i) = md.results.TransientSolution(k).FloatingArea;
+		results.mass(i)        = md.results.TransientSolution(k).IceVolumeScaled*md.materials.rho_ice;
+		results.massaf(i)       = md.results.TransientSolution(k).IceVolumeAboveFloatationScaled*md.materials.rho_ice;
+		results.groundedarea(i) = md.results.TransientSolution(k).GroundedAreaScaled;
+		results.floatingarea(i) = md.results.TransientSolution(k).FloatingAreaScaled;
 	end
 
 	%--- flux scalar diagnostics: yearly average over every solution stored within
 	%    that calendar year (Gt/yr -> kg/s where relevant) ---
-	raw_smbtot       = arrayfun(@(k) md.results.TransientSolution(k).TotalSmb*10^12/md.constants.yts, 1:Nsol);
-	raw_bmbgr        = zeros(1,Nsol);     %grounded basal mass balance not in this model setup - set to 0
-	raw_bmbfl        = zeros(1,Nsol);     %floating basal mass balance not in this model setup - set to 0
-	%TODO: not provided by this model setup - populate before submission (kg/s)
-	raw_calvtot      = NaN*ones(1,Nsol);  %tendlicalvf   (total calving flux)
-	raw_frontmelttot = NaN*ones(1,Nsol);  %tendlifmassbf (total ice-front melt flux)
-	raw_gltot        = NaN*ones(1,Nsol);  %tendligroundf (total grounding-line flux)
+	%Scalar grounded/floating basal mass balance totals - fall back to 0 if these
+	%weren't requested (matches the physical 0 already used for grounded bmb, and
+	%avoids a hard crash on older/different result sets).
+	has_totalbmbgr = isfield(md.results.TransientSolution,'TotalGroundedBmbScaled');
+	if ~has_totalbmbgr,
+		warning('ISMIP7:nototalbmbgr','TotalGroundedBmbScaled not found in the solutions - tendlibmassbfgr treated as 0.');
+	end
+	has_totalbmbfl = isfield(md.results.TransientSolution,'TotalFloatingBmbScaled');
+	if ~has_totalbmbfl,
+		warning('ISMIP7:nototalbmbfl','TotalFloatingBmbScaled not found in the solutions - tendlibmassbffl treated as 0.');
+	end
+	raw_smbtot       = arrayfun(@(k) md.results.TransientSolution(k).TotalSmbScaled*10^12/md.constants.yts, 1:Nsol);
+	if has_totalbmbgr,
+		raw_bmbgr = arrayfun(@(k) md.results.TransientSolution(k).TotalGroundedBmbScaled*10^12/md.constants.yts, 1:Nsol);  %expect ~0 - no grounded-ice basal melt in this model setup
+	else
+		raw_bmbgr = zeros(1,Nsol);
+	end
+	if has_totalbmbfl,
+		raw_bmbfl = arrayfun(@(k) md.results.TransientSolution(k).TotalFloatingBmbScaled*10^12/md.constants.yts, 1:Nsol);
+	else
+		raw_bmbfl = zeros(1,Nsol);
+	end
+	%Calving/front-melt totals: TotalCalvingFluxLevelset and TotalCalvingMeltingFluxLevelset
+	%follow the same Gt/yr -> kg/s convention as TotalSmb above (same underlying rho_ice-scaled
+	%ISSM diagnostic family). TotalCalvingMeltingFluxLevelset is the COMBINED calving+melt flux,
+	%so the melt-only term is isolated by subtracting the calving-only total from it.
+	%Left at fill value for historical runs, where the front is prescribed (see is_historical above).
+	if ~is_historical,
+		raw_calvtot      = arrayfun(@(k) md.results.TransientSolution(k).TotalCalvingFluxLevelset*10^12/md.constants.yts, 1:Nsol);
+		raw_frontmelttot = arrayfun(@(k) (md.results.TransientSolution(k).TotalCalvingMeltingFluxLevelset-md.results.TransientSolution(k).TotalCalvingFluxLevelset)*10^12/md.constants.yts, 1:Nsol);
+	else
+		raw_calvtot      = NaN*ones(1,Nsol);  %tendlicalvf   - fill value (front prescribed)
+		raw_frontmelttot = NaN*ones(1,Nsol);  %tendlifmassbf - fill value (front prescribed)
+	end
+	%tendligroundf: GroundinglineMassFlux follows the same Gt/yr -> kg/s convention as
+	%TotalSmb/TotalCalvingFluxLevelset above (same underlying rho_ice-scaled ISSM
+	%diagnostic family). Not tied to the prescribed-front issue, so filled in every
+	%experiment including historical.
+	raw_gltot = arrayfun(@(k) md.results.TransientSolution(k).GroundinglineMassFlux*10^12/md.constants.yts, 1:Nsol);
 
 	results.smbtot       = zeros(1,nyears);
 	results.bmbgr         = zeros(1,nyears);
@@ -235,6 +278,14 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	if ~has_bmbfl,
 		warning('ISMIP7:nobmbfl','BasalforcingsFloatingiceMeltingRate not found in the solutions - gridded floating basal melt (libmassbffl) treated as 0.');
 	end
+	%Grounding-line flux needs the depth-averaged velocity on a 3D/layered mesh (this matches
+	%what ISSM's own GroundinglineMassFlux diagnostic uses internally - see movingfront_core.cpp).
+	%On a genuinely 2D model Vx/Vy already ARE the depth average, so this only matters for
+	%GrIS-style 3D setups.
+	has_vxavg = isfield(md.results.TransientSolution,'VxAverage');
+	if ~has_vxavg,
+		warning('ISMIP7:novxavg','VxAverage/VyAverage not found in the solutions - using Vx/Vy directly for the grounding-line flux calculation (only correct for a depth-uniform/2D model).');
+	end
 	%ISMIP7 standard grids (ISMIP6 domains, EPSG:3413 for GrIS, EPSG:3031 for AIS).
 	%Allowed resolutions (multiples of 2 km): GrIS 1/2/4/8/16 km, AIS 2/4/8/16 km.
 	posting = resolution_km*1000;
@@ -314,10 +365,14 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%Extra mandatory ISMIP7 fields handled outside the per-domain loops
 	results.base       = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 	results.sftgif     = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
-	%Mandatory, but not produced by this converter - written as fill values (TODO: populate before submission)
-	results.libmassbfgr= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
+	%ligroundf: filled below in the per-timestep loops via compute_ligroundf, in every experiment.
+	%lifmassbf: filled below in the per-timestep loops from CalvingMeltingFluxLevelset-CalvingFluxLevelset
+	%           (non-historical only - stays fill value for historical/prescribed-front runs).
 	results.ligroundf  = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 	results.lifmassbf  = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
+	%libmassbfgr: set below (0 under grounded ice - this model has no grounded-ice basal
+	%melt/refreeze - fill value elsewhere) once sftgrf is available.
+	results.libmassbfgr= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 
 	if strcmp(icesheetname,'GrIS'),
 		for i=1:length(results.timegrid),
@@ -357,11 +412,17 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			results.surftemp(:,:,i)=transpose(surftemp);
 			basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 			results.basetemp(:,:,i)=transpose(basetemp);
-			%Effective pressure clamped at 0:right at flotation, floating-point roundoff produced negative values
+			%Effective pressure clamped at 0: right at flotation, floating-point roundoff
+			%produced tiny negative drag values that failed the ISMIP7 checker.
 			Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices)),0);
 			vel_drag=sqrt(md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices).^2+md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices).^2)/md.constants.yts;
 			drag_mesh=md.friction.coefficient(1:md.mesh.numberofvertices).^2.*Neff_drag.*vel_drag;
-			% fill mesh points where drag fails checker with NaN
+			%With linear Budd friction confirmed (p=q=1), the formula above is the right
+			%physics, so a vertex this far above the checker's 1e6 Pa cap is a data/
+			%inversion artifact (a runaway friction coefficient or a locally noisy
+			%velocity right at a shear margin) rather than a formula error. The ISMIP7
+			%checker tolerates missing values, so these vertices are masked to NaN rather
+			%than clamped to an arbitrary, still-fictitious number.
 			baddrag=find(drag_mesh>1e6);
 			if ~isempty(baddrag),
 				[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
@@ -374,13 +435,35 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
 			drag(drag<0)=0; %clamp any residual floating-point noise from interpolation (leaves NaN untouched)
 			results.drag(:,:,i)=transpose(drag);
-			calving=NaN*ones(nlines,ncols);
-			results.calving(:,:,i)=transpose(calving);
+			%--- calving / ice-front-melt: only meaningful when the front is dynamically
+			%    simulated (see is_historical note above). Built from the raw calving-law
+			%    rate fields (compute_calvingflux, mirroring compute_ligroundf) rather than
+			%    ISSM's own CalvingFluxLevelset/CalvingMeltingFluxLevelset, which are
+			%    normalized to the vertical ice-front FACE area, not the horizontal
+			%    grid-cell area ISMIP7 wants - see compute_calvingflux's header for detail.
+			%    The SCALAR totals below (tendlicalvf/tendlifmassbf) never had this problem
+			%    - Total* never divides by area - and still come from TotalCalvingFluxLevelset/
+			%    TotalCalvingMeltingFluxLevelset as before.
+			if ~is_historical,
+				icels_calv = md.results.TransientSolution(results.timegrid(i)).MaskIceLevelset(1:md.mesh.numberofvertices);
+				crx_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratex(1:md.mesh.numberofvertices);
+				cry_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratey(1:md.mesh.numberofvertices);
+				mr_calv    = md.results.TransientSolution(results.timegrid(i)).CalvingMeltingrate(1:md.mesh.numberofvertices);
+				vx_calv    = md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices);
+				vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
+				thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
+				[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
+				calving=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+				results.calving(:,:,i)=transpose(calving);
+				frontmelt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
+				results.lifmassbf(:,:,i)=transpose(frontmelt);
+			end
 			mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset(1:md.mesh.numberofvertices),xgrid,ygrid,-1);
 			mask(find(mask>0))=1;
 			mask(find(mask<0))=0;
 			results.mask(:,:,i)=transpose(mask);
-			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).MaskOceanLevelset(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+			gl_raw=md.results.TransientSolution(results.timegrid(i)).MaskOceanLevelset(1:md.mesh.numberofvertices);
+			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
 			groundedice(find(groundedice>0))=1;
 			groundedice(find(groundedice<0))=0;
 			floatingice=1-groundedice;
@@ -388,6 +471,19 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			floatingice(find(isnan(floatingice)))=0;
 			results.groundedice(:,:,i)=transpose(groundedice.*mask);
 			results.floatingice(:,:,i)=transpose(floatingice.*mask);
+			%--- grounding-line flux: physically meaningful in every experiment (unlike
+			%    calving, it is not tied to a prescribed front) ---
+			if has_vxavg,
+				vxgl=md.results.TransientSolution(results.timegrid(i)).VxAverage(1:md.mesh.numberofvertices);
+				vygl=md.results.TransientSolution(results.timegrid(i)).VyAverage(1:md.mesh.numberofvertices);
+			else
+				vxgl=md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices);
+				vygl=md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
+			end
+			thickness_gl=md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
+			lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,thickness_gl,vxgl,vygl,md.materials.rho_ice);
+			ligroundf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+			results.ligroundf(:,:,i)=transpose(ligroundf);
 			%--- flux fields for this output period: averaged over every raw solution
 			%    stored within it, rather than a single end-of-period snapshot ---
 			bidx = blockidx{i};
@@ -409,9 +505,9 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 				meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
 			end
 			bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-			%libmassbffl's fill policy requires missing (not 0) outside floating
-			%ice. Multiplying by (1-groundedice) wrote a defined 0 there instead -
-			%mask to NaN explicitly so write_gridded_var converts it to _FillValue.
+			%libmassbffl's fill policy requires missing (not 0) outside floating ice.
+			%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
+			%NaN explicitly so write_gridded_var converts it to _FillValue.
 			bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
 			bmbval(transpose(groundedice)==1)=NaN;
 			results.bmb(:,:,i)=bmbval;
@@ -461,19 +557,18 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			%temperature field is available for this domain.
 			basetemp=NaN*ones(nlines,ncols);
 			results.basetemp(:,:,i)=transpose(basetemp);
-			%Effective pressure clamped at 0: rho_ice*H+rho_water*Base crosses zero
-			%right at flotation, and floating-point roundoff there was producing the
-			%tiny negative drag values (e.g. -4e-9 Pa) that failed the ISMIP7 checker.
+			%Effective pressure clamped at 0: rho_ice*H+rho_water*Base crosses zero right
+			%at flotation, and floating-point roundoff there was producing tiny negative
+			%drag values that failed the ISMIP7 checker.
 			Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base),0);
 			vel_drag=md.results.TransientSolution(results.timegrid(i)).Vel/md.constants.yts;
 			drag_mesh=md.friction.coefficient.^2.*Neff_drag.*vel_drag;
-			%With linear Budd friction confirmed (p=q=1), the formula above is the
-			%right physics, so a vertex this far above the checker's 1e6 Pa cap is a
-			%data/inversion artifact (a runaway friction coefficient or a locally
-			%noisy velocity right at a shear margin) rather than a formula error.
-			%The ISMIP7 checker tolerates missing values, so these vertices are
-			%masked to NaN rather than clamped to an arbitrary, still-fictitious
-			%number - that keeps every other (valid) vertex in this field untouched.
+			%With linear Budd friction confirmed (p=q=1), the formula above is the right
+			%physics, so a vertex this far above the checker's 1e6 Pa cap is a data/
+			%inversion artifact (a runaway friction coefficient or a locally noisy
+			%velocity right at a shear margin) rather than a formula error. The ISMIP7
+			%checker tolerates missing values, so these vertices are masked to NaN rather
+			%than clamped to an arbitrary, still-fictitious number.
 			baddrag=find(drag_mesh>1e6);
 			if ~isempty(baddrag),
 				[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
@@ -486,26 +581,55 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
 			drag(drag<0)=0; %clamp any residual floating-point noise from interpolation (leaves NaN untouched)
 			results.drag(:,:,i)=transpose(drag);
-			calving=NaN*ones(nlines,ncols);
-			results.calving(:,:,i)=transpose(calving);
+			%--- calving / ice-front-melt: only meaningful when the front is dynamically
+			%    simulated (see is_historical note above). Built from the raw calving-law
+			%    rate fields (compute_calvingflux, mirroring compute_ligroundf) - see the
+			%    matching GrIS comment above for why this replaces ISSM's own
+			%    CalvingFluxLevelset/CalvingMeltingFluxLevelset for the gridded fields.
+			%    AIS is a 2D model here, so Vx/Vy are used directly (matches the plain
+			%    Vx/Vy that Tria::CalvingMeltingFluxLevelset itself uses for the melt
+			%    direction, as opposed to the depth-averaged velocity grounding line needs).
+			if ~is_historical,
+				icels_calv = md.results.TransientSolution(results.timegrid(i)).MaskIceLevelset;
+				crx_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratex;
+				cry_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratey;
+				mr_calv    = md.results.TransientSolution(results.timegrid(i)).CalvingMeltingrate;
+				vx_calv    = md.results.TransientSolution(results.timegrid(i)).Vx;
+				vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy;
+				thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness;
+				[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
+				calving=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+				results.calving(:,:,i)=transpose(calving);
+				frontmelt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
+				results.lifmassbf(:,:,i)=transpose(frontmelt);
+			end
 			mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset,xgrid,ygrid,-1);
 			mask(find(mask>0))=1;
 			mask(find(mask<0))=-1;
 			results.mask(:,:,i)=transpose(mask);
-			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).MaskGroundediceLevelset,xgrid,ygrid,NaN);
+			%NOTE: assumes MaskGroundediceLevelset follows the same sign convention as
+			%MaskOceanLevelset used in the GrIS branch (>0 grounded, <0 floating) - worth
+			%double-checking against your ISSM version if the grounding-line results look off.
+			gl_raw=md.results.TransientSolution(results.timegrid(i)).MaskGroundediceLevelset;
+			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
 			groundedice(find(groundedice>0))=1;
 			groundedice(find(groundedice<0))=0;
-			%MaskGroundediceLevelset only encodes grounded-vs-floating (bed vs sea
-			%level) - it has no notion of ice presence, so ice-free rock above sea
-			%level (e.g. exposed mountains) would otherwise be flagged as "grounded"
-			%here. Multiply by the true ice-extent indicator (mask>0, from
-			%ice_levelset) before storing - matching the fix already applied in the
-			%GrIS branch above. The raw (unmasked) local groundedice variable is left
-			%as-is for the bmb weighting below, where 1-groundedice already
-			%correctly evaluates to 0 over ice-free land.
+			%MaskGroundediceLevelset only encodes grounded-vs-floating (bed vs sea level)
+			%- it has no notion of ice presence, so ice-free rock above sea level (e.g.
+			%exposed mountains) would otherwise be flagged as "grounded" here. Multiply
+			%by the true ice-extent indicator (mask>0, from ice_levelset) before storing
+			%- matching the fix already applied in the GrIS branch above. The raw
+			%(unmasked) local groundedice variable is left as-is for the bmb weighting
+			%below, where 1-groundedice already correctly evaluates to 0 over ice-free land.
 			icemask=double(mask>0);
 			results.groundedice(:,:,i)=transpose(groundedice.*icemask);
 			results.floatingice(:,:,i)=transpose((1-groundedice).*icemask);
+			%--- grounding-line flux: physically meaningful in every experiment (unlike
+			%    calving, it is not tied to a prescribed front). AIS is a 2D model here,
+			%    so Vx/Vy are already the depth average - no VxAverage/VyAverage needed. ---
+			lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,md.results.TransientSolution(results.timegrid(i)).Thickness,md.results.TransientSolution(results.timegrid(i)).Vx,md.results.TransientSolution(results.timegrid(i)).Vy,md.materials.rho_ice);
+			ligroundf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+			results.ligroundf(:,:,i)=transpose(ligroundf);
 			%--- flux fields for this output period: averaged over every raw solution
 			%    stored within it, rather than a single end-of-period snapshot ---
 			bidx = blockidx{i};
@@ -525,9 +649,9 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 				meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
 			end
 			bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-			%libmassbffl's fill policy requires missing (not 0) outside floating
-			%ice. Multiplying by (1-groundedice) wrote a defined 0 there instead -
-			%mask to NaN explicitly so write_gridded_var converts it to _FillValue.
+			%libmassbffl's fill policy requires missing (not 0) outside floating ice.
+			%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
+			%NaN explicitly so write_gridded_var converts it to _FillValue.
 			bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
 			bmbval(transpose(groundedice)==1)=NaN;
 			results.bmb(:,:,i)=bmbval;
@@ -546,16 +670,24 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	results.sftgrf = results.groundedice .* icepresent;  %grounded fraction, 0 outside ice
 	results.sftflf = results.floatingice .* icepresent;  %floating fraction, 0 outside ice
 
-	%Physical consistency: grounded ice rests directly on the bed, so wherever a
-	%cell is classified wholly grounded (sftgrf==1), base must equal topg. Left
-	%alone, 'base' and 'topg' are interpolated independently from the mesh, and
-	%at grid cells straddling the grounding line the two interpolations don't
-	%always land on exactly the same value even though the (separately
-	%thresholded) mask rounds that cell to "grounded" - the same kind of
-	%interpolate-then-threshold mismatch as the grounded/floating mask fixes
-	%above. Force it directly rather than leave a ~0.008% mismatch for the checker.
+	%Physical consistency: grounded ice rests directly on the bed, so wherever a cell
+	%is classified wholly grounded (sftgrf==1), base must equal topg. Left alone,
+	%'base' and 'topg' are interpolated independently from the mesh, and at grid cells
+	%straddling the grounding line the two interpolations don't always land on exactly
+	%the same value even though the (separately thresholded) mask rounds that cell to
+	%"grounded" - the same kind of interpolate-then-threshold mismatch as the
+	%grounded/floating mask fixes above. Force it directly rather than leave a small
+	%mismatch for the checker.
 	fullygrounded = results.sftgrf==1;
 	results.base(fullygrounded) = results.bed(fullygrounded);
+
+	%libmassbfgr: this model does not simulate basal melt/refreeze under grounded ice, so
+	%the value is a genuine physical 0 (not a missing computation) everywhere grounded ice
+	%is present - consistent with tendlibmassbfgr above, which is computed from
+	%TotalGroundedBmbScaled and expected to come out ~0 for the same reason. Left at fill
+	%outside grounded ice (floating ice or ice-free), consistent with libmassbffl covering
+	%the floating regime instead and the fill_policy for cells where neither applies.
+	results.libmassbfgr(results.sftgrf>0) = 0;
 
 	%Data-request fill policies the generic NaN handling in write_gridded_var
 	%doesn't know about:
@@ -593,9 +725,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		end
 	end
 
-	warning('ISMIP7:placeholder',['These mandatory variables are not produced by this ' ...
-		'converter and are written as fill/NaN - populate before submission: libmassbfgr, ' ...
-		'licalvf, ligroundf, lifmassbf (gridded); tendlicalvf, tendlifmassbf, tendligroundf (scalar).']);
+	if is_historical,
+		warning('ISMIP7:placeholder',['These mandatory variables are not produced by this ' ...
+			'converter and are written as fill/NaN - populate before submission: licalvf, ' ...
+			'lifmassbf (gridded) and tendlicalvf, tendlifmassbf (scalar) - left at fill for ' ...
+			'this historical run since the front is prescribed.']);
+	end
 
 	%Columns: variable_id, standard_name, units, data, zero_outside_ice, is_flux
 	%  zero_outside_ice=true: data-request fill_policy is 'forbidden' - the
@@ -737,3 +872,243 @@ function write_gridded_var(fname,variable_id,standard_name,units,data,xcoord,yco
 		netcdf.putVar(ncid,bnds_var_id,[0 0],[2 numel(time_days)],single(time_bnds));
 	end
 	netcdf.close(ncid);
+
+function ligroundf=compute_ligroundf(elements,x,y,gl,thickness,vx,vy,rho_ice)
+	%compute_ligroundf - per-element grounding-line mass flux, per unit HORIZONTAL area
+	%
+	%   elements          : Ne x 3 vertex indices (1-based)
+	%   x, y              : Nv x 1 vertex coordinates
+	%   gl                : Nv x 1 grounding mask (>0 grounded, <0 floating) - e.g.
+	%                       MaskOceanLevelset or MaskGroundediceLevelset
+	%   thickness, vx, vy : Nv x 1, at the SAME timestep as gl (vx,vy should be the
+	%                       depth-averaged velocity for a 3D/layered mesh)
+	%   rho_ice           : scalar, kg/m^3
+	%
+	%Returns ligroundf: Ne x 1, flux per unit horizontal area, in the same time units
+	%as vx/vy (e.g. kg/m^2/yr if vx,vy are m/yr - divide by yts outside this function
+	%for kg/m^2/s). Zero for elements the grounding line does not pass through.
+	%
+	%Geometry and the front-point ordering exactly mirror ISSM's
+	%Tria::GroundinglineMassFlux (classes/Elements/Tria.cpp); the normal formula
+	%exactly mirrors shared/Numerics/Normals.cpp:LineSectionNormal, so - unlike
+	%Tria::GroundinglineMassFlux itself - this version divides by the element's
+	%HORIZONTAL area instead of skipping the area division, giving a true
+	%per-unit-area flux rather than a raw per-element mass-flux contribution.
+
+	Ne = size(elements,1);
+	ligroundf = zeros(Ne,1);
+	eps_ = 1e-15;
+
+	for e = 1:Ne,
+		idx = elements(e,:);
+		xyz = [x(idx), y(idx)];
+		g   = gl(idx);
+		g(g==0) = eps_;   %avoid exact-zero degenerate case
+
+		if all(g>0) || all(g<0), continue; end   %grounding line does not cross this element
+
+		h = thickness(idx);
+		u = vx(idx);
+		v = vy(idx);
+
+		xyz_front = zeros(2,2);
+		h_front   = zeros(2,1);
+		u_front   = zeros(2,1);
+		v_front   = zeros(2,1);
+		pt1 = 1; pt2 = 2;   %MATLAB 1-based version of the C++ pt1=0,pt2=1
+
+		if g(1)*g(2) > 0,        %nodes 1,2 same sign -> cross edges (3-2) and (3-1)
+			s1 = g(3)/(g(3)-g(2));
+			s2 = g(3)/(g(3)-g(1));
+			if g(3) < 0, pt1 = 2; pt2 = 1; end
+			xyz_front(pt2,:) = xyz(3,:) + s1*(xyz(2,:)-xyz(3,:));
+			xyz_front(pt1,:) = xyz(3,:) + s2*(xyz(1,:)-xyz(3,:));
+			h_front(pt2) = h(3)+s1*(h(2)-h(3)); h_front(pt1) = h(3)+s2*(h(1)-h(3));
+			u_front(pt2) = u(3)+s1*(u(2)-u(3)); u_front(pt1) = u(3)+s2*(u(1)-u(3));
+			v_front(pt2) = v(3)+s1*(v(2)-v(3)); v_front(pt1) = v(3)+s2*(v(1)-v(3));
+		elseif g(2)*g(3) > 0,    %nodes 2,3 same sign -> cross edges (1-2) and (1-3)
+			s1 = g(1)/(g(1)-g(2));
+			s2 = g(1)/(g(1)-g(3));
+			if g(1) < 0, pt1 = 2; pt2 = 1; end
+			xyz_front(pt1,:) = xyz(1,:) + s1*(xyz(2,:)-xyz(1,:));
+			xyz_front(pt2,:) = xyz(1,:) + s2*(xyz(3,:)-xyz(1,:));
+			h_front(pt1) = h(1)+s1*(h(2)-h(1)); h_front(pt2) = h(1)+s2*(h(3)-h(1));
+			u_front(pt1) = u(1)+s1*(u(2)-u(1)); u_front(pt2) = u(1)+s2*(u(3)-u(1));
+			v_front(pt1) = v(1)+s1*(v(2)-v(1)); v_front(pt2) = v(1)+s2*(v(3)-v(1));
+		else                      %nodes 1,3 same sign -> cross edges (2-1) and (2-3)
+			s1 = g(2)/(g(2)-g(1));
+			s2 = g(2)/(g(2)-g(3));
+			if g(2) < 0, pt1 = 2; pt2 = 1; end
+			xyz_front(pt2,:) = xyz(2,:) + s1*(xyz(1,:)-xyz(2,:));
+			xyz_front(pt1,:) = xyz(2,:) + s2*(xyz(3,:)-xyz(2,:));
+			h_front(pt2) = h(2)+s1*(h(1)-h(2)); h_front(pt1) = h(2)+s2*(h(3)-h(2));
+			u_front(pt2) = u(2)+s1*(u(1)-u(2)); u_front(pt1) = u(2)+s2*(u(3)-u(2));
+			v_front(pt2) = v(2)+s1*(v(1)-v(2)); v_front(pt1) = v(2)+s2*(v(3)-v(2));
+		end
+
+		d = xyz_front(2,:) - xyz_front(1,:);
+		L = norm(d);
+		if L < eps_, continue; end
+		n = [d(2), -d(1)]/L;   %LineSectionNormal: normal=[dy,-dx], normalized
+
+		%Simpson's rule (exact for this quadratic integrand): t=0, 0.5, 1
+		hm = 0.5*(h_front(1)+h_front(2));
+		um = 0.5*(u_front(1)+u_front(2));
+		vm = 0.5*(v_front(1)+v_front(2));
+
+		f0 = rho_ice*h_front(1)*(u_front(1)*n(1)+v_front(1)*n(2));
+		f1 = rho_ice*h_front(2)*(u_front(2)*n(1)+v_front(2)*n(2));
+		fm = rho_ice*hm       *(um*n(1)+vm*n(2));
+		flux = L/6*(f0 + 4*fm + f1);
+
+		%Horizontal (map-view) element area - NOT the front cross-section area
+		area = 0.5*abs((xyz(1,1)-xyz(3,1))*(xyz(2,2)-xyz(1,2)) - ...
+		               (xyz(1,1)-xyz(2,1))*(xyz(3,2)-xyz(1,2)));
+
+		ligroundf(e) = flux/area;
+	end
+
+function [calvflux,meltflux]=compute_calvingflux(elements,x,y,icels,thickness,calvingratex,calvingratey,meltingrate,vx,vy,rho_ice)
+	%compute_calvingflux - per-element calving-only and melt-only mass flux, per unit
+	%HORIZONTAL area (fixes the front-face-area normalization ISSM's own
+	%CalvingFluxLevelset/CalvingMeltingFluxLevelset use - see md2ismip7's calving
+	%comments above).
+	%
+	%   elements                   : Ne x 3 vertex indices (1-based)
+	%   x, y                       : Nv x 1 vertex coordinates
+	%   icels                      : Nv x 1 ice-front mask, MaskIceLevelset (<0 ice present)
+	%   thickness                  : Nv x 1
+	%   calvingratex, calvingratey : Nv x 1, calving-law rate vector (Calvingratex/Calvingratey)
+	%   meltingrate                : Nv x 1, frontal/undercutting melt rate MAGNITUDE (CalvingMeltingrate)
+	%   vx, vy                     : Nv x 1, ice velocity - gives the melt rate a direction
+	%                                (plain Vx/Vy, matching what Tria::CalvingMeltingFluxLevelset
+	%                                itself uses - not the depth-averaged velocity grounding
+	%                                line needs)
+	%   rho_ice                    : scalar, kg/m^3
+	%
+	%Returns calvflux, meltflux: Ne x 1 each, flux per unit horizontal area, in the same
+	%time units as calvingratex/vx (e.g. kg/m^2/yr if those are m/yr - divide by yts
+	%outside this function for kg/m^2/s). Zero for elements the ice front does not cross.
+	%
+	%Geometry, front-point ordering and rate formulas exactly mirror ISSM's
+	%Tria::CalvingFluxLevelset / Tria::CalvingMeltingFluxLevelset (classes/Elements/Tria.cpp):
+	%calving-only uses (calvingratex,calvingratey); melt-only uses meltingrate projected onto
+	%the local ice-velocity direction. The normal is LineSectionNormal's [dy,-dx], NEGATED
+	%(Tria::CalvingFluxLevelset flips the sign after calling NormalSection - unlike
+	%Tria::GroundinglineMassFlux, which does not). This function divides by the element's
+	%HORIZONTAL area instead of skipping the division (Total*) or dividing by the vertical
+	%ice-front face area (ISSM's own CalvingFluxLevelset/CalvingMeltingFluxLevelset), and
+	%returns calving-only and melt-only separately instead of calving-only and a
+	%calving+melt-combined field.
+	%
+	%ACCURACY NOTE: the calving-only integrand is quadratic in the segment parameter (like
+	%compute_ligroundf), so the 3-point Simpson's rule below is exact for it. The melt-only
+	%integrand involves meltingrate*v/|v|, a ratio of linear functions, so it is NOT
+	%exactly polynomial - Simpson's rule is only an approximation there, evaluated pointwise
+	%at the same 3 points ISSM's own 3-point Gauss quadrature would use, so it should be
+	%comparably accurate to ISSM's own internal computation, not a downgrade from it.
+
+	eps_ = 1e-15;
+	Ne = size(elements,1);
+	calvflux = zeros(Ne,1);
+	meltflux = zeros(Ne,1);
+
+	for e = 1:Ne,
+		idx = elements(e,:);
+		xyz = [x(idx), y(idx)];
+		g   = icels(idx);
+		g(g==0) = eps_;
+
+		if all(g>0) || all(g<0), continue; end   %ice front does not cross this element
+
+		h   = thickness(idx);
+		crx = calvingratex(idx);
+		cry = calvingratey(idx);
+		mr  = meltingrate(idx);
+		u   = vx(idx);
+		v   = vy(idx);
+
+		xyz_front = zeros(2,2);
+		h_front=zeros(2,1); crx_front=zeros(2,1); cry_front=zeros(2,1);
+		mr_front=zeros(2,1); u_front=zeros(2,1); v_front=zeros(2,1);
+		pt1 = 1; pt2 = 2;
+
+		if g(1)*g(2) > 0,        %nodes 1,2 same sign -> cross edges (3-2) and (3-1)
+			s1 = g(3)/(g(3)-g(2));
+			s2 = g(3)/(g(3)-g(1));
+			if g(3) < 0, pt1 = 2; pt2 = 1; end
+			xyz_front(pt2,:) = xyz(3,:) + s1*(xyz(2,:)-xyz(3,:));
+			xyz_front(pt1,:) = xyz(3,:) + s2*(xyz(1,:)-xyz(3,:));
+			h_front(pt2)  = h(3)+s1*(h(2)-h(3));     h_front(pt1)  = h(3)+s2*(h(1)-h(3));
+			crx_front(pt2)= crx(3)+s1*(crx(2)-crx(3)); crx_front(pt1)= crx(3)+s2*(crx(1)-crx(3));
+			cry_front(pt2)= cry(3)+s1*(cry(2)-cry(3)); cry_front(pt1)= cry(3)+s2*(cry(1)-cry(3));
+			mr_front(pt2) = mr(3)+s1*(mr(2)-mr(3));   mr_front(pt1) = mr(3)+s2*(mr(1)-mr(3));
+			u_front(pt2)  = u(3)+s1*(u(2)-u(3));       u_front(pt1)  = u(3)+s2*(u(1)-u(3));
+			v_front(pt2)  = v(3)+s1*(v(2)-v(3));       v_front(pt1)  = v(3)+s2*(v(1)-v(3));
+		elseif g(2)*g(3) > 0,    %nodes 2,3 same sign -> cross edges (1-2) and (1-3)
+			s1 = g(1)/(g(1)-g(2));
+			s2 = g(1)/(g(1)-g(3));
+			if g(1) < 0, pt1 = 2; pt2 = 1; end
+			xyz_front(pt1,:) = xyz(1,:) + s1*(xyz(2,:)-xyz(1,:));
+			xyz_front(pt2,:) = xyz(1,:) + s2*(xyz(3,:)-xyz(1,:));
+			h_front(pt1)  = h(1)+s1*(h(2)-h(1));     h_front(pt2)  = h(1)+s2*(h(3)-h(1));
+			crx_front(pt1)= crx(1)+s1*(crx(2)-crx(1)); crx_front(pt2)= crx(1)+s2*(crx(3)-crx(1));
+			cry_front(pt1)= cry(1)+s1*(cry(2)-cry(1)); cry_front(pt2)= cry(1)+s2*(cry(3)-cry(1));
+			mr_front(pt1) = mr(1)+s1*(mr(2)-mr(1));   mr_front(pt2) = mr(1)+s2*(mr(3)-mr(1));
+			u_front(pt1)  = u(1)+s1*(u(2)-u(1));       u_front(pt2)  = u(1)+s2*(u(3)-u(1));
+			v_front(pt1)  = v(1)+s1*(v(2)-v(1));       v_front(pt2)  = v(1)+s2*(v(3)-v(1));
+		else                      %nodes 1,3 same sign -> cross edges (2-1) and (2-3)
+			s1 = g(2)/(g(2)-g(1));
+			s2 = g(2)/(g(2)-g(3));
+			if g(2) < 0, pt1 = 2; pt2 = 1; end
+			xyz_front(pt2,:) = xyz(2,:) + s1*(xyz(1,:)-xyz(2,:));
+			xyz_front(pt1,:) = xyz(2,:) + s2*(xyz(3,:)-xyz(2,:));
+			h_front(pt2)  = h(2)+s1*(h(1)-h(2));     h_front(pt1)  = h(2)+s2*(h(3)-h(2));
+			crx_front(pt2)= crx(2)+s1*(crx(1)-crx(2)); crx_front(pt1)= crx(2)+s2*(crx(3)-crx(2));
+			cry_front(pt2)= cry(2)+s1*(cry(1)-cry(2)); cry_front(pt1)= cry(2)+s2*(cry(3)-cry(2));
+			mr_front(pt2) = mr(2)+s1*(mr(1)-mr(2));   mr_front(pt1) = mr(2)+s2*(mr(3)-mr(2));
+			u_front(pt2)  = u(2)+s1*(u(1)-u(2));       u_front(pt1)  = u(2)+s2*(u(3)-u(2));
+			v_front(pt2)  = v(2)+s1*(v(1)-v(2));       v_front(pt1)  = v(2)+s2*(v(3)-v(2));
+		end
+
+		d = xyz_front(2,:) - xyz_front(1,:);
+		L = norm(d);
+		if L < eps_, continue; end
+		n = [-d(2), d(1)]/L;   %LineSectionNormal=[dy,-dx], then NEGATED (matches Tria::CalvingFluxLevelset)
+
+		%midpoint values (linear interpolation along the front - exact since h/crx/cry/mr/u/v are all P1)
+		hm   = 0.5*(h_front(1)+h_front(2));
+		crxm = 0.5*(crx_front(1)+crx_front(2));
+		crym = 0.5*(cry_front(1)+cry_front(2));
+		um   = 0.5*(u_front(1)+u_front(2));
+		vm   = 0.5*(v_front(1)+v_front(2));
+		mrm  = 0.5*(mr_front(1)+mr_front(2));
+
+		%melt rate direction = local ice-velocity direction, magnitude = meltingrate,
+		%evaluated pointwise at t=0, 0.5, 1 (matches Tria::CalvingMeltingFluxLevelset)
+		vel0 = sqrt(u_front(1)^2+v_front(1)^2)+1e-14;
+		vel1 = sqrt(u_front(2)^2+v_front(2)^2)+1e-14;
+		velm = sqrt(um^2+vm^2)+1e-14;
+		mrx0 = mr_front(1)*u_front(1)/vel0; mry0 = mr_front(1)*v_front(1)/vel0;
+		mrx1 = mr_front(2)*u_front(2)/vel1; mry1 = mr_front(2)*v_front(2)/vel1;
+		mrxm = mrm*um/velm;                 mrym = mrm*vm/velm;
+
+		%calving-only flux (Simpson's rule - exact, quadratic integrand)
+		f0c = rho_ice*h_front(1)*(crx_front(1)*n(1)+cry_front(1)*n(2));
+		f1c = rho_ice*h_front(2)*(crx_front(2)*n(1)+cry_front(2)*n(2));
+		fmc = rho_ice*hm       *(crxm*n(1)+crym*n(2));
+		fluxc = L/6*(f0c + 4*fmc + f1c);
+
+		%melt-only flux (Simpson's rule - approximation, see ACCURACY NOTE above)
+		f0m = rho_ice*h_front(1)*(mrx0*n(1)+mry0*n(2));
+		f1m = rho_ice*h_front(2)*(mrx1*n(1)+mry1*n(2));
+		fmm = rho_ice*hm       *(mrxm*n(1)+mrym*n(2));
+		fluxm = L/6*(f0m + 4*fmm + f1m);
+
+		%Horizontal (map-view) element area - NOT the front cross-section area
+		area = 0.5*abs((xyz(1,1)-xyz(3,1))*(xyz(2,2)-xyz(1,2)) - ...
+		               (xyz(1,1)-xyz(2,1))*(xyz(3,2)-xyz(1,2)));
+
+		calvflux(e) = fluxc/area;
+		meltflux(e) = fluxm/area;
+	end
