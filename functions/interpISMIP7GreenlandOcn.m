@@ -265,12 +265,18 @@ disp(['   == Interpolating on model mesh (' num2str(md.mesh.numberofvertices) ' 
 TF_matrix  = zeros(md.mesh.numberofvertices, nt); % deg C, per vertex per month
 SGD_matrix = zeros(md.mesh.numberofvertices, nt); % m^3 s^-1, per vertex per month (converted to m^3/day below)
 
+progress_msg = '';
 for i = 1:nt
+	fprintf(repmat('\b', 1, length(progress_msg)));
+	progress_msg = sprintf('   -- interpolating time step %d/%d (year %d)', i, nt, time_year(i));
+	fprintf('%s', progress_msg);
+
 	TF_matrix(:, i) = InterpFromGrid(x_n, y_n, tf_data(:, :, i)', ...
 		md.mesh.x, md.mesh.y, 'linear');
 	SGD_matrix(:, i) = InterpFromGrid(x_n, y_n, sgd_data(:, :, i)', ...
 		md.mesh.x, md.mesh.y, 'linear');
 end
+fprintf('\n');
 
 TF_matrix  = max(0, TF_matrix);
 SGD_matrix = max(0, SGD_matrix);
