@@ -219,10 +219,46 @@ for f = 1:nfiles
 	tfnc  = fullfile(tffiles(f).folder,  tffiles(f).name);
 	sgdnc = fullfile(sgdfiles(f).folder, sgdfiles(f).name);
 
-	% grid is assumed identical across years, so only read it once
+	% Every file's x/y is read and checked on every iteration -- these are
+	% tiny 1D coordinate vectors (~1681/2881 numbers), so this costs
+	% essentially nothing, and it protects against the TF/SGD grids (read
+	% from two different files/directories) or the historical/spliced-in
+	% ssp370 grids (under 'calving-calibration') silently drifting apart.
+	x_tf  = double(ncread(tfnc,  'x')); % meters
+	y_tf  = double(ncread(tfnc,  'y')); % meters
+	x_sgd = double(ncread(sgdnc, 'x')); % meters
+	y_sgd = double(ncread(sgdnc, 'y')); % meters
+	if ~isequal(x_tf, x_sgd) || ~isequal(y_tf, y_sgd)
+		error(['TF and SGD grids do not match for ' tffiles(f).name ' / ' sgdfiles(f).name '.']);
+	end
+
 	if f == 1
-		x_n = double(ncread(tfnc, 'x')); % meters
-		y_n = double(ncread(tfnc, 'y')); % meters
+		% Crop to the mesh's bounding box (+ a small buffer), same approach
+		% as interpISMIP6GreenlandSMB.m and interpISMIP7GreenlandSMB.m,
+		% instead of reading the full 1681x2881 grid for every year/month.
+		% The crop window is computed once, from this first file's grid,
+		% and reused for every subsequent read (verified below).
+		x_full = x_tf;
+		y_full = y_tf;
+
+		offset = 2;
+
+		xmin = min(md.mesh.x(:)); xmax = max(md.mesh.x(:));
+		posx = find(x_full <= xmax);
+		id1x = max(1, find(x_full >= xmin,1) - offset);
+		id2x = min(numel(x_full), posx(end) + offset);
+
+		ymin = min(md.mesh.y(:)); ymax = max(md.mesh.y(:));
+		posy = find(y_full <= ymax);
+		id1y = max(1, find(y_full >= ymin,1) - offset);
+		id2y = min(numel(y_full), posy(end) + offset);
+
+		x_n = x_full(id1x:id2x);
+		y_n = y_full(id1y:id2y);
+	elseif ~isequal(x_tf, x_full) || ~isequal(y_tf, y_full)
+		error(['Grid for ' tffiles(f).name ' does not match the grid used to compute the ' ...
+			'crop window (from ' tffiles(1).name '). This can happen if the historical and ' ...
+			'spliced scenario grids differ under ''calving-calibration''.']);
 	end
 
 	% each file's time units give its own reference date, e.g.
@@ -236,8 +272,10 @@ for f = 1:nfiles
 	refdate  = [str2double(tok{1}), str2double(tok{2}), str2double(tok{3})];
 	time_days(end+1:end+length(time_f), 1) = time_f + datenum(refdate) - datenum(1900,1,1);
 
-	tf_list{f}  = double(ncread(tfnc,  'tf'));
-	sgd_list{f} = double(ncread(sgdnc, 'sgd'));
+	% Only read the cropped x/y window computed above; Inf reads every
+	% time step present in this file (12 months).
+	tf_list{f}  = double(ncread(tfnc,  'tf',  [id1x id1y 1], [id2x-id1x+1, id2y-id1y+1, Inf]));
+	sgd_list{f} = double(ncread(sgdnc, 'sgd', [id1x id1y 1], [id2x-id1x+1, id2y-id1y+1, Inf]));
 
 	for i = 1:3
 		assert(size(sgd_list{f}, i) == size(tf_list{f}, i), ...
