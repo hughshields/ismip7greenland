@@ -8,19 +8,21 @@
 #   Models:    CESM2-WACCM, MRI-ESM2-0 (and OCX)
 #   Scenarios: historical (filtered to 2007-2014), ssp370, ssp126, ssp585
 #
-# Each model/scenario pulls three variables: tf, sgd, acabf-anomaly.
+# Each model/scenario pulls four variables: tf, sgd, acabf-anomaly, dacabfdz.
 # Directory naming and version numbers differ slightly by model (see
 # get_relpaths() below):
 #
 #   CESM2-WACCM:
 #     ocean-1000m/tf/v2
 #     SDBN1-1000m/sgd/v2
-#     SDBN1-1000m/acabf-anomaly/v3 
+#     SDBN1-1000m/acabf-anomaly/v3
+#     SDBN1-1000m/dacabfdz/v3
 #
 #   MRI-ESM2-0:
 #     ocean-1000m/tf/v1
 #     GEMB-SDBN1-1000m/sgd/v1
 #     GEMB-SDBN1-1000m/acabf-anomaly/v2
+#     GEMB-SDBN1-1000m/dacabfdz/v2
 #
 #   OCX products (no scenario level, filtered to 2007-2025 by default;
 #   RACMO2.3p2-ERA acabf (SMB) instead pulls 1958-2025):
@@ -94,13 +96,15 @@ get_relpaths() {
             printf '%s\n' \
                 "ocean-1000m/tf/v2" \
                 "SDBN1-1000m/sgd/v2" \
-                "SDBN1-1000m/acabf-anomaly/v3"
+                "SDBN1-1000m/acabf-anomaly/v3" \
+                "SDBN1-1000m/dacabfdz/v3"
             ;;
         MRI-ESM2-0)
             printf '%s\n' \
                 "ocean-1000m/tf/v1" \
                 "GEMB-SDBN1-1000m/sgd/v1" \
-                "GEMB-SDBN1-1000m/acabf-anomaly/v2"
+                "GEMB-SDBN1-1000m/acabf-anomaly/v2" \
+                "GEMB-SDBN1-1000m/dacabfdz/v2"
             ;;
         *)
             echo "Unknown model: $model" >&2
