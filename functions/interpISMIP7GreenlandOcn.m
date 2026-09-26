@@ -67,7 +67,7 @@ switch oshostname(),
 end
 
 valid_models = {'CESM2-WACCM', 'MRI-ESM2-0'};
-valid_scenarios = {'historical', 'ssp370', 'ssp126', 'ssp585', 'calving-calibration'};
+valid_scenarios = {'historical', 'ssp126', 'ssp370', 'ssp585', 'ctrl', 'calving-calibration'};
 
 if ~ismember(model_name, valid_models)
 	error('Model ''%s'' not supported. Valid models: %s', model_name, strjoin(valid_models, ', '));

@@ -50,7 +50,7 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 	end
 
 	valid_models    = {'CESM2-WACCM', 'MRI-ESM2-0'};
-	valid_scenarios = {'historical', 'ssp370', 'ssp126', 'ssp585'};
+	valid_scenarios = {'historical', 'ssp126', 'ssp370', 'ssp585', 'ctrl'};
 
 	if ~ismember(modelname, valid_models)
 		error('Model ''%s'' not supported. Valid models: %s', modelname, strjoin(valid_models, ', '));
