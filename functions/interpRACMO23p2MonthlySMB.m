@@ -19,7 +19,7 @@ function [output] = interpRACMO23p2MonthlySMB(X,Y,t_start,t_end,ncpath),
 	if nargin < 5 || isempty(ncpath)
 		switch oshostname(),
 			case {'totten'}
-				ncpath = '/totten_1/ModelData/ISMIP7/GrIS/OCX/RACMO2.3p2-ERA/SDBN1-1000m/acabf/v1';
+				ncpath = '/totten_1/ModelData/ISMIP7/ISMIP7/GrIS/OCX/RACMO2.3p2-ERA/SDBN1-1000m/acabf/v1';
 			case {'epica'}
 				ncpath = '/data2/issm/shields/ismip7greenland/ModelData/ISMIP7/GrIS/OCX/RACMO2.3p2-ERA/SDBN1-1000m/acabf/v1';
 			otherwise
