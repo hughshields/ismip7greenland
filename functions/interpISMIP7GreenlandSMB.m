@@ -63,10 +63,10 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 	switch modelname
 		case 'CESM2-WACCM'
 			anomaly_pattern = 'SDBN1-1000m/acabf-anomaly/v3/acabf*.nc';
-			dz_pattern      = 'SDBN1-1000m/dacabfdz/v3/acabf*.nc';
+			dz_pattern      = 'SDBN1-1000m/dacabfdz/v3/dacabfdz*.nc';
 		case 'MRI-ESM2-0'
 			anomaly_pattern = 'GEMB-SDBN1-1000m/acabf-anomaly/v2/acabf*.nc';
-			dz_pattern      = 'GEMB-SDBN1-1000m/dacabfdz/v2/acabf*.nc';
+			dz_pattern      = 'GEMB-SDBN1-1000m/dacabfdz/v2/dacabfdz*.nc';
 	end
 
 	% Load RACMO24p1_ERA5 dataset and compute climatological mean value of SMB 
@@ -204,8 +204,11 @@ function [data_matrix, time_vec] = loadISMIP7YearlyField(datadir, modelname, sce
 		%since 1850-01-01 (standard/Gregorian calendar) for both
 		%acabf-anomaly and dacabfdz files -- NOT days-of-year -- so it must
 		%be decoded against that epoch rather than added to the filename year.
+		%date2decyear expects a MATLAB datenum, so convert the 1850-01-01
+		%epoch + raw day offset into one before calling it (same pattern
+		%used for the ISMIP7 ocean forcing in interpISMIP7GreenlandOcn.m).
 		temp_time_raw = double(ncread(field_file{i},'time')); % days since 1850-01-01
-		temp_time = ismip7_days1850_to_decyear(temp_time_raw);
+		temp_time = date2decyear(datenum(1850,1,1) + temp_time_raw);
 
 		% sanity check: decoded year should be within ~1 year of the
 		% filename's year (catches any future change in the time encoding)
@@ -218,7 +221,7 @@ function [data_matrix, time_vec] = loadISMIP7YearlyField(datadir, modelname, sce
 
 		% Now, interpolate onto the mesh
 		for j = 1:size(field_data,3)
-			temp_interp = InterpFromGridToMesh(x_n,y_n,field_data(:,:,j)',md.mesh.x,md.mesh.y,NaN);
+			temp_interp = InterpFromGrid(x_n,y_n,field_data(:,:,j)',double(md.mesh.x),double(md.mesh.y));
 
 			% Concatenate dataset
 			data_matrix = [data_matrix, temp_interp];
@@ -228,21 +231,4 @@ function [data_matrix, time_vec] = loadISMIP7YearlyField(datadir, modelname, sce
 	fprintf('\n');
 
 	clear field_data x_n y_n;
-end
-
-function decyear = ismip7_days1850_to_decyear(days_since_1850)
-	%ismip7_days1850_to_decyear - convert ISMIP7 'time' values (days since
-	%1850-01-01, standard/Gregorian calendar -- confirmed via ncdump) into a
-	%decimal year, accounting for leap years exactly rather than assuming a
-	%fixed 365 or 365.25-day year.
-
-	ref_date = datetime(1850,1,1);
-	dates    = ref_date + days(days_since_1850);
-	yrs      = year(dates);
-	doy      = day(dates,'dayofyear');
-
-	is_leap = (mod(yrs,4)==0 & (mod(yrs,100)~=0 | mod(yrs,400)==0));
-	days_in_year = 365 + double(is_leap);
-
-	decyear = yrs + (doy-1)./days_in_year;
 end
