@@ -200,15 +200,26 @@ function [data_matrix, time_vec] = loadISMIP7YearlyField(datadir, modelname, sce
 		field_data = field_data/md.materials.rho_ice*md.constants.yts; % kg m-2 s-1 -> ice m yr-1
 
 		%Load time data
-		%NOTE: confirmed via ncdump that 'time' is stored as absolute days
-		%since 1850-01-01 (standard/Gregorian calendar) for both
-		%acabf-anomaly and dacabfdz files -- NOT days-of-year -- so it must
-		%be decoded against that epoch rather than added to the filename year.
-		%date2decyear expects a MATLAB datenum, so convert the 1850-01-01
-		%epoch + raw day offset into one before calling it (same pattern
-		%used for the ISMIP7 ocean forcing in interpISMIP7GreenlandOcn.m).
-		temp_time_raw = double(ncread(field_file{i},'time')); % days since 1850-01-01
-		temp_time = date2decyear(datenum(1850,1,1) + temp_time_raw);
+		%NOTE: the 'time' variable's reference date is NOT the same across
+		%all ISMIP7 GrIS files: historical/ssp files use a fixed epoch of
+		%1850-01-01, but 'ctrl' files instead encode time relative to each
+		%file's own year (e.g. dacabfdz: 'days since 2206-12-31 ...',
+		%acabf-anomaly: 'days since 2206-01-16'). Hardcoding the 1850-01-01
+		%epoch decodes 'ctrl' files to ~1850 instead of their real year, so
+		%the reference date is read from each file's own time:units
+		%attribute instead of being assumed.
+		%date2decyear expects a MATLAB datenum, so convert the parsed
+		%reference date + raw day offset into one before calling it (same
+		%pattern used for the ISMIP7 ocean forcing in
+		%interpISMIP7GreenlandOcn.m).
+		time_units   = ncreadatt(field_file{i}, 'time', 'units'); % e.g. 'days since 1850-01-01' or 'days since 2206-01-16'
+		ref_date_str = regexp(time_units, '\d{4}-\d{2}-\d{2}', 'match', 'once');
+		if isempty(ref_date_str)
+			error('Could not parse a reference date out of time:units ''%s'' for %s', time_units, field_file{i});
+		end
+		ref_datenum   = datenum(ref_date_str, 'yyyy-mm-dd');
+		temp_time_raw = double(ncread(field_file{i},'time')); % days since ref_datenum
+		temp_time     = date2decyear(ref_datenum + temp_time_raw);
 
 		% sanity check: decoded year should be within ~1 year of the
 		% filename's year (catches any future change in the time encoding)
