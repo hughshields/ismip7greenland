@@ -17,14 +17,14 @@ loadonly = 0;
 historical_start_time = 2007;
 historical_end_time = 2015;
 projection_start_time = 2015;
-projection_end_time = 2301;
+projection_end_time = 2016;
 
 % Climate Models
 climate_models = {'CESM2-WACCM', 'MRI-ESM2-0'};
 climate_model = climate_models{1}
 % Forecast Parameters
 scenarios = {'ssp585', 'ssp370', 'ssp126', 'ctrl'};
-scenario = scenarios{1};
+scenario = scenarios{3};
 % Folder to store models
 folder = 'models';
 
@@ -229,7 +229,7 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
    % JAKOBSHAVN_ISBRAE
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==86), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1450; % % % %1425;
    md.calving.stress_threshold_floatingice(pos) = 442; %445; %440; %430; %425; %400; %450; %460; %475; %500; %550; %450;  % % %
-   side_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'Exp/IceShelves/Jakobshavn_Side.exp','element',0));
+   side_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'exp/iceshelves/Jakobshavn_Side.exp','element',0));
    md.calving.stress_threshold_groundedice(side_pos) = 1650; %1600; % % %1500; %1400;
    md.calving.stress_threshold_floatingice(side_pos) = 372; %371; %372; %370; %375; %350; %300; %400; %200; %150; %100;
    % KANGERLUARSUUP_SERMIA
@@ -458,13 +458,13 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==150), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %DONE
    % PETERMANN_GLETSCHER
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==152), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %Domain does not cover shelf
-   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'Exp/IceShelves/Petermann_Shelf.exp','element',0));
+   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'exp/iceshelves/Petermann_Shelf.exp','element',0));
    md.calving.stress_threshold_floatingice(union(pos,shelf_pos)) = 30; %50; %200; %DONE
    % PETERMANN_GLETSCHER_N
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==153), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %3100; %1000;
    % RYDER_GLETSCHER
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==166), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 3100; %DONE
-   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'Exp/IceShelves/Ryder_Shelf.exp','element',0));
+   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'exp/iceshelves/Ryder_Shelf.exp','element',0));
    md.calving.stress_threshold_floatingice(union(pos,shelf_pos)) = 3100; %DONE
    % STEENSBY_GLETSCHER
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==205), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %DONE
@@ -492,7 +492,7 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==132), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %DONE, completely above sea level
    % NIOGHALVFJERDSFJORDEN
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==134), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %3100; %Shelf outside of domain (here I only apply the shelf value to the current shelf)
-   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'Exp/IceShelves/Nioghalvfjerdsfjorden_Shelf.exp','element',0));
+   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'exp/iceshelves/Nioghalvfjerdsfjorden_Shelf.exp','element',0));
    md.calving.stress_threshold_floatingice(shelf_pos) = 30; %50; %100;     %400; %800; %2500; %3100;
    % NORDENSKIOLD_NE
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==140), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 3100; %2000; %DONE
@@ -503,7 +503,7 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==201), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %DONE, grounding line above sea level for now
    % STORSTROMMEN
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==209), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %DONE, again only outlined shelf
-   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'Exp/IceShelves/Drachmann_Storstrommen_Shelf.exp','element',0));
+   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'exp/iceshelves/Drachmann_Storstrommen_Shelf.exp','element',0));
    md.calving.stress_threshold_floatingice(shelf_pos) = 10; %20; %30;      %50; %200; %2000;
    % WAHLENBERG_VIOLINGLETSJER
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==248), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 1000; %DONE, completely above sea level
@@ -513,7 +513,7 @@ if perform(org,['Greenland_ISMIP7Prep_' climate_model '_' upper(scenario)]),% {{
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==250), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 3100; %DONE
    % ZACHARIAE_ISSTROM
    [tmp,pos] = ismember(intersect(find(md.miscellaneous.dummy.catchment_id==253), md.mesh.extractedelements), md.mesh.extractedelements); md.calving.stress_threshold_groundedice(pos) = 2000;     %1500; %1000; % Shelf not within domain
-   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'Exp/IceShelves/Zachariae_Isstrom_Shelf.exp','element',0));
+   shelf_pos = find(ContourToMesh(md.mesh.elements, md.mesh.x, md.mesh.y,'exp/iceshelves/Zachariae_Isstrom_Shelf.exp','element',0));
    md.calving.stress_threshold_floatingice(union(pos,shelf_pos)) = 175; %200;     %100; %200; %400 %;3100; %DONE
    %}}}
  % === CE Glaciers (DONE) === %{{{
@@ -831,10 +831,10 @@ if perform(org,['Greenland_ISMIP7Run_' climate_model '_' upper(scenario) '_' int
    md.timestepping.final_time=projection_end_time;
 	md.settings.output_frequency=10;
 	
-	disp('   Removing unused SMB forcings');
-	t = md.smb.mass_balance(end, :);                       % time stamps
-	mask = (t >= projection_start_time) & (t < projection_end_time + 1);
-	md.smb.mass_balance = md.smb.mass_balance(:, mask);
+%	disp('   Removing unused SMB forcings');
+%	t = md.smb.mass_balance(end, :);                       % time stamps
+%	mask = (t >= projection_start_time) & (t < projection_end_time + 1);
+%	md.smb.mass_balance = md.smb.mass_balance(:, mask);
 
 	md.verbose.solution = true;
 	%md.verbose=verbose('all');
