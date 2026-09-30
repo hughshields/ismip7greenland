@@ -14,14 +14,21 @@ function frontalforcing = interpISMIP7GreenlandOcn(md,model_name,scenario)
 %
 %   Input:
 %     - md (model object)
-%     - model_name (string): name of the climate model
-%     - scenario (string): climate scenario
+%     - model_name (string): name of the climate model, or 'OCX'
+%     - scenario (string): climate scenario. Not used for 'OCX' (it has no
+%       scenario level) -- when model_name is 'OCX' this argument may be
+%       omitted or left empty, and a start_end range may be passed here
+%       instead (see below).
 %     - supported combinations:
 %
 %             Model              Scenarios
 %             -----------------------------------------------
 %             CESM2-WACCM        historical, ssp370, ssp126, ssp585, calving-calibration
 %             MRI-ESM2-0         historical, ssp370, ssp126, ssp585, calving-calibration
+%             OCX                (none -- thermal forcing from EN4, subglacial
+%                                  discharge from RACMO2.3p2-ERA, defaulting
+%                                  to 2007-2025; pass [start_year end_year] as
+%                                  the 3rd argument to override)
 %
 %     - 'calving-calibration' is not a raw model scenario: for the given
 %       model_name it concatenates every available year of 'historical'
@@ -53,6 +60,8 @@ function frontalforcing = interpISMIP7GreenlandOcn(md,model_name,scenario)
 %      md.frontalforcings = interpISMIP7GreenlandOcn(md,'CESM2-WACCM','ssp370');
 %      md.frontalforcings = interpISMIP7GreenlandOcn(md,'MRI-ESM2-0','historical');
 %      md.frontalforcings = interpISMIP7GreenlandOcn(md,'CESM2-WACCM','calving-calibration');
+%      md.frontalforcings = interpISMIP7GreenlandOcn(md,'OCX');
+%      md.frontalforcings = interpISMIP7GreenlandOcn(md,'OCX',[2007, 2020]);
 
 % ---------------------------------------------------------------------
 % Resolve data directory and check inputs
@@ -66,14 +75,28 @@ switch oshostname(),
 		error('machine not supported yet, please provide your own path');
 end
 
-valid_models = {'CESM2-WACCM', 'MRI-ESM2-0'};
+if nargin < 3
+	scenario = '';
+end
+
+% OCX has no scenario level, so allow a start_end range to be passed
+% positionally as the 3rd argument instead, e.g.
+% interpISMIP7GreenlandOcn(md,'OCX',[2007, 2020]).
+if strcmpi(model_name, 'OCX') && isnumeric(scenario) && ~isempty(scenario)
+	ocx_start_end = scenario;
+	scenario      = '';
+else
+	ocx_start_end = [];
+end
+
+valid_models = {'CESM2-WACCM', 'MRI-ESM2-0', 'OCX'};
 valid_scenarios = {'historical', 'ssp126', 'ssp370', 'ssp585', 'ctrl', 'calving-calibration'};
 
 if ~ismember(model_name, valid_models)
 	error('Model ''%s'' not supported. Valid models: %s', model_name, strjoin(valid_models, ', '));
 end
 
-if ~ismember(scenario, valid_scenarios)
+if ~strcmpi(model_name, 'OCX') && ~ismember(scenario, valid_scenarios)
 	error('Scenario ''%s'' not supported. Valid scenarios: %s', scenario, strjoin(valid_scenarios, ', '));
 end
 
@@ -87,89 +110,134 @@ SPLICE_SCENARIO   = 'ssp370';
 SPLICE_START_YEAR = 2015;
 SPLICE_END_YEAR   = 2024;
 
-switch model_name
-	case 'CESM2-WACCM'
-		tf_subpath  = 'ocean-1000m/tf/v2';
-		sgd_subpath = 'SDBN1-1000m/sgd/v2';
-	case 'MRI-ESM2-0'
-		tf_subpath  = 'ocean-1000m/tf/v1';
-		sgd_subpath = 'GEMB-SDBN1-1000m/sgd/v1';
-end
-
-if strcmp(scenario, 'calving-calibration')
-
-	% -- historical portion: use every year that is available --
-	hist_root        = [path 'GrIS/' model_name '/historical'];
-	hist_tf_pattern  = [hist_root '/' tf_subpath  '/*.nc'];
-	hist_sgd_pattern = [hist_root '/' sgd_subpath '/*.nc'];
-	hist_tffiles  = dir(hist_tf_pattern);
-	hist_sgdfiles = dir(hist_sgd_pattern);
-
-	if isempty(hist_tffiles)
-		error('No historical thermal forcing files found. Pattern: %s', hist_tf_pattern);
-	end
-	if isempty(hist_sgdfiles)
-		error('No historical subglacial discharge files found. Pattern: %s', hist_sgd_pattern);
-	end
-	if length(hist_tffiles) ~= length(hist_sgdfiles)
-		error(['Number of historical thermal forcing files (%d) does not match number of ' ...
-			'historical subglacial discharge files (%d). Check that both directories cover ' ...
-			'the same years.'], length(hist_tffiles), length(hist_sgdfiles));
+if strcmpi(model_name, 'OCX')
+	if ~isempty(scenario)
+		warning('ISMIP7:ocxScenarioIgnored', ...
+			'OCX has no scenario level; ignoring scenario argument ''%s''.', scenario);
 	end
 
-	% -- future portion: splice in SPLICE_SCENARIO, restricted to the splice window --
-	splice_root        = [path 'GrIS/' model_name '/' SPLICE_SCENARIO];
-	splice_tf_pattern  = [splice_root '/' tf_subpath  '/*.nc'];
-	splice_sgd_pattern = [splice_root '/' sgd_subpath '/*.nc'];
-	splice_tffiles  = dir(splice_tf_pattern);
-	splice_sgdfiles = dir(splice_sgd_pattern);
-
-	if isempty(splice_tffiles)
-		error('No %s thermal forcing files found. Pattern: %s', SPLICE_SCENARIO, splice_tf_pattern);
-	end
-	if isempty(splice_sgdfiles)
-		error('No %s subglacial discharge files found. Pattern: %s', SPLICE_SCENARIO, splice_sgd_pattern);
+	if isempty(ocx_start_end)
+		ocx_start_year = 2007;
+		ocx_end_year   = 2025;
+	else
+		ocx_start_year = ocx_start_end(1);
+		ocx_end_year   = ocx_start_end(2);
 	end
 
-	% restrict the splice scenario to the splice window years only
-	splice_tf_years  = cellfun(@(n) str2double(regexp(n, '\d{4}(?=\.nc$)', 'match', 'once')), {splice_tffiles.name});
-	splice_sgd_years = cellfun(@(n) str2double(regexp(n, '\d{4}(?=\.nc$)', 'match', 'once')), {splice_sgdfiles.name});
-	splice_tffiles   = splice_tffiles(splice_tf_years  >= SPLICE_START_YEAR & splice_tf_years  <= SPLICE_END_YEAR);
-	splice_sgdfiles  = splice_sgdfiles(splice_sgd_years >= SPLICE_START_YEAR & splice_sgd_years <= SPLICE_END_YEAR);
-
-	if isempty(splice_tffiles)
-		error('No %s thermal forcing files found in the splice window %d-%d. Pattern: %s', ...
-			SPLICE_SCENARIO, SPLICE_START_YEAR, SPLICE_END_YEAR, splice_tf_pattern);
-	end
-	if isempty(splice_sgdfiles)
-		error('No %s subglacial discharge files found in the splice window %d-%d. Pattern: %s', ...
-			SPLICE_SCENARIO, SPLICE_START_YEAR, SPLICE_END_YEAR, splice_sgd_pattern);
-	end
-	if length(splice_tffiles) ~= length(splice_sgdfiles)
-		error(['Number of %s splice-window thermal forcing files (%d) does not match number of ' ...
-			'%s splice-window subglacial discharge files (%d). Check that both directories cover ' ...
-			'the same years.'], SPLICE_SCENARIO, length(splice_tffiles), SPLICE_SCENARIO, length(splice_sgdfiles));
-	end
-
-	disp(['   == ''calving-calibration'': splicing ' model_name ' historical with ' ...
-		SPLICE_SCENARIO ' (' num2str(SPLICE_START_YEAR) '-' num2str(SPLICE_END_YEAR) ')']);
-
-	tffiles  = [hist_tffiles;  splice_tffiles];
-	sgdfiles = [hist_sgdfiles; splice_sgdfiles];
-
-else
-	rootname    = [path 'GrIS/' model_name '/' scenario];
-	tf_pattern  = [rootname '/' tf_subpath  '/*.nc'];
-	sgd_pattern = [rootname '/' sgd_subpath '/*.nc'];
+	tf_pattern  = [path 'GrIS/OCX/EN4/ocean-1000m/tf/v1/*.nc'];
+	sgd_pattern = [path 'GrIS/OCX/RACMO2.3p2-ERA/SDBN1-1000m/sgd/v1/*.nc'];
 
 	tffiles  = dir(tf_pattern);
 	sgdfiles = dir(sgd_pattern);
 
 	if isempty(tffiles)
-		error('No thermal forcing files found. Pattern: %s', tf_pattern);
+		error('No OCX thermal forcing files found. Pattern: %s', tf_pattern);
 	end
 	if isempty(sgdfiles)
-		error('No subglacial discharge files found. Pattern: %s', sgd_pattern);
+		error('No OCX subglacial discharge files found. Pattern: %s', sgd_pattern);
+	end
+
+	% restrict both products to the requested year range (default 2007-2025)
+	tf_years  = cellfun(@(n) str2double(regexp(n, '\d{4}(?=\.nc$)', 'match', 'once')), {tffiles.name});
+	sgd_years = cellfun(@(n) str2double(regexp(n, '\d{4}(?=\.nc$)', 'match', 'once')), {sgdfiles.name});
+	tffiles   = tffiles(tf_years   >= ocx_start_year & tf_years  <= ocx_end_year);
+	sgdfiles  = sgdfiles(sgd_years >= ocx_start_year & sgd_years <= ocx_end_year);
+
+	if isempty(tffiles)
+		error('No OCX thermal forcing files found in %d-%d. Pattern: %s', ocx_start_year, ocx_end_year, tf_pattern);
+	end
+	if isempty(sgdfiles)
+		error('No OCX subglacial discharge files found in %d-%d. Pattern: %s', ocx_start_year, ocx_end_year, sgd_pattern);
+	end
+
+	disp(['   == Loading OCX ocean forcing (TF: EN4, SGD: RACMO2.3p2-ERA), ' ...
+		num2str(ocx_start_year) '-' num2str(ocx_end_year)]);
+
+else
+	switch model_name
+		case 'CESM2-WACCM'
+			tf_subpath  = 'ocean-1000m/tf/v2';
+			sgd_subpath = 'SDBN1-1000m/sgd/v2';
+		case 'MRI-ESM2-0'
+			tf_subpath  = 'ocean-1000m/tf/v1';
+			sgd_subpath = 'GEMB-SDBN1-1000m/sgd/v1';
+	end
+	
+	if strcmp(scenario, 'calving-calibration')
+	
+		% -- historical portion: use every year that is available --
+		hist_root        = [path 'GrIS/' model_name '/historical'];
+		hist_tf_pattern  = [hist_root '/' tf_subpath  '/*.nc'];
+		hist_sgd_pattern = [hist_root '/' sgd_subpath '/*.nc'];
+		hist_tffiles  = dir(hist_tf_pattern);
+		hist_sgdfiles = dir(hist_sgd_pattern);
+	
+		if isempty(hist_tffiles)
+			error('No historical thermal forcing files found. Pattern: %s', hist_tf_pattern);
+		end
+		if isempty(hist_sgdfiles)
+			error('No historical subglacial discharge files found. Pattern: %s', hist_sgd_pattern);
+		end
+		if length(hist_tffiles) ~= length(hist_sgdfiles)
+			error(['Number of historical thermal forcing files (%d) does not match number of ' ...
+				'historical subglacial discharge files (%d). Check that both directories cover ' ...
+				'the same years.'], length(hist_tffiles), length(hist_sgdfiles));
+		end
+	
+		% -- future portion: splice in SPLICE_SCENARIO, restricted to the splice window --
+		splice_root        = [path 'GrIS/' model_name '/' SPLICE_SCENARIO];
+		splice_tf_pattern  = [splice_root '/' tf_subpath  '/*.nc'];
+		splice_sgd_pattern = [splice_root '/' sgd_subpath '/*.nc'];
+		splice_tffiles  = dir(splice_tf_pattern);
+		splice_sgdfiles = dir(splice_sgd_pattern);
+	
+		if isempty(splice_tffiles)
+			error('No %s thermal forcing files found. Pattern: %s', SPLICE_SCENARIO, splice_tf_pattern);
+		end
+		if isempty(splice_sgdfiles)
+			error('No %s subglacial discharge files found. Pattern: %s', SPLICE_SCENARIO, splice_sgd_pattern);
+		end
+	
+		% restrict the splice scenario to the splice window years only
+		splice_tf_years  = cellfun(@(n) str2double(regexp(n, '\d{4}(?=\.nc$)', 'match', 'once')), {splice_tffiles.name});
+		splice_sgd_years = cellfun(@(n) str2double(regexp(n, '\d{4}(?=\.nc$)', 'match', 'once')), {splice_sgdfiles.name});
+		splice_tffiles   = splice_tffiles(splice_tf_years  >= SPLICE_START_YEAR & splice_tf_years  <= SPLICE_END_YEAR);
+		splice_sgdfiles  = splice_sgdfiles(splice_sgd_years >= SPLICE_START_YEAR & splice_sgd_years <= SPLICE_END_YEAR);
+	
+		if isempty(splice_tffiles)
+			error('No %s thermal forcing files found in the splice window %d-%d. Pattern: %s', ...
+				SPLICE_SCENARIO, SPLICE_START_YEAR, SPLICE_END_YEAR, splice_tf_pattern);
+		end
+		if isempty(splice_sgdfiles)
+			error('No %s subglacial discharge files found in the splice window %d-%d. Pattern: %s', ...
+				SPLICE_SCENARIO, SPLICE_START_YEAR, SPLICE_END_YEAR, splice_sgd_pattern);
+		end
+		if length(splice_tffiles) ~= length(splice_sgdfiles)
+			error(['Number of %s splice-window thermal forcing files (%d) does not match number of ' ...
+				'%s splice-window subglacial discharge files (%d). Check that both directories cover ' ...
+				'the same years.'], SPLICE_SCENARIO, length(splice_tffiles), SPLICE_SCENARIO, length(splice_sgdfiles));
+		end
+	
+		disp(['   == ''calving-calibration'': splicing ' model_name ' historical with ' ...
+			SPLICE_SCENARIO ' (' num2str(SPLICE_START_YEAR) '-' num2str(SPLICE_END_YEAR) ')']);
+	
+		tffiles  = [hist_tffiles;  splice_tffiles];
+		sgdfiles = [hist_sgdfiles; splice_sgdfiles];
+	
+	else
+		rootname    = [path 'GrIS/' model_name '/' scenario];
+		tf_pattern  = [rootname '/' tf_subpath  '/*.nc'];
+		sgd_pattern = [rootname '/' sgd_subpath '/*.nc'];
+	
+		tffiles  = dir(tf_pattern);
+		sgdfiles = dir(sgd_pattern);
+	
+		if isempty(tffiles)
+			error('No thermal forcing files found. Pattern: %s', tf_pattern);
+		end
+		if isempty(sgdfiles)
+			error('No subglacial discharge files found. Pattern: %s', sgd_pattern);
+		end
 	end
 end
 
@@ -199,7 +267,12 @@ nfiles = length(tffiles);
 % filenames are chronologically sorted, so the first/last give the year range
 yr_first = regexp(tffiles(1).name,   '\d{4}(?=\.nc$)', 'match', 'once');
 yr_last  = regexp(tffiles(end).name, '\d{4}(?=\.nc$)', 'match', 'once');
-disp(['   == Loading ISMIP7 ocean forcing (TF/SGD) for ' model_name ' ' scenario ', ' ...
+if strcmpi(model_name, 'OCX')
+	forcing_label = 'OCX (EN4 TF / RACMO2.3p2-ERA SGD)';
+else
+	forcing_label = [model_name ' ' scenario];
+end
+disp(['   == Loading ISMIP7 ocean forcing (TF/SGD) for ' forcing_label ', ' ...
 	yr_first '-' yr_last]);
 
 x_n = [];
