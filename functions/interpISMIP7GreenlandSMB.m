@@ -110,9 +110,11 @@ function smb = interpISMIP7GreenlandSMB(md, modelname, scenario, start_end)
 		% NOTE: unlike CESM2-WACCM/MRI-ESM2-0, this is the actual SMB, not
 		% an anomaly relative to a climatology.
 		smb_ocx = interpRACMO23p2MonthlySMB(md.mesh.x, md.mesh.y, ocx_start_year, ocx_end_year, ocx_acabf_dir);
+		smb_ocx(isnan(smb_ocx)) = 0; % (time row is never NaN, so this only zeros SMB gaps)
 
 		[smb_dz, time_dz] = loadISMIP7YearlyField(ocx_dacabfdz_pattern, 'dacabfdz', ...
 			[ocx_start_year ocx_end_year], md, 'SMB-vs-elevation gradient (dSMB/dz) for OCX RACMO2.3p2-ERA');
+		smb_dz(isnan(smb_dz)) = 0;
 
 		smb        = SMBgradients();
 		smb.href   = md.geometry.surface;
