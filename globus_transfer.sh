@@ -29,6 +29,7 @@
 #     OCX/EN4/ocean-1000m/tf/v1
 #     OCX/RACMO2.3p2-ERA/SDBN1-1000m/acabf/v1
 #     OCX/RACMO2.3p2-ERA/SDBN1-1000m/sgd/v1
+#     OCX/RACMO2.3p2-ERA/SDBN1-1000m/dacabfdz/v1
 #
 # Also grabs one standalone file (see SINGLE_FILES below):
 #     ISMIP7/tools/ismip7-gris-ocean-forcing/subglacial_discharge_basins_ismip.nc
@@ -79,6 +80,7 @@ OCX_PATHS=(
     "EN4|ocean-1000m/tf/v1|"
     "RACMO2.3p2-ERA|SDBN1-1000m/acabf/v1|${OCX_SMB_YEAR_REGEX}"
     "RACMO2.3p2-ERA|SDBN1-1000m/sgd/v1|"
+    "RACMO2.3p2-ERA|SDBN1-1000m/dacabfdz/v1|"
 )
 
 # Scratch files for batch transfers (reused/overwritten each iteration)
