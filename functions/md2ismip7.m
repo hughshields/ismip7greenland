@@ -2,7 +2,7 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%Create netcdf files for an experiment following ISMIP7 conventions
 	%
 	%directoryname:      base output directory (ISMIP7 subdirectories are created below it)
-	%icesheetname:       domain_id, 'GrIS' or 'AIS'
+	%icesheetname:       domain_id, 'GrIS' (Greenland only; Antarctica support removed)
 	%source_id:          modelling group name (no '_', '.' or special characters)
 	%ism_id:             ice sheet model name and version (no '_', '.' or special characters)
 	%ism_member_id:      ISM choice variant, e.g. 'm001'
@@ -13,12 +13,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%time_range:         start-end year of the experiment, e.g. '2015-2300' (optional;
 	%                    auto-derived from the model output years if empty/omitted)
 	%resolution_km:      output grid resolution in km (optional, default 8).
-	%                    Allowed: GrIS 1/2/4/8/16 km, AIS 2/4/8/16 km.
+	%                    Allowed: 1/2/4/8/16 km.
 	%output_interval_yr: interval in years between 2-D (gridded) output snapshots
 	%                    (optional, default 1). Scalars are always annual.
 
 	if nargin<12 || isempty(resolution_km),
-		resolution_km=8; %default resolution valid for both GrIS and AIS
+		resolution_km=8; %default GrIS resolution
 	end
 	if nargin<13 || isempty(output_interval_yr),
 		output_interval_yr=1;
@@ -28,8 +28,8 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		error(['directory ' directoryname ' does not exist']);
 	end
 
-	if ~strcmp(icesheetname,'GrIS') & ~strcmp(icesheetname,'AIS'),
-		error('icesheetname (domain_id) should be GrIS or AIS');
+	if ~strcmp(icesheetname,'GrIS'),
+		error('icesheetname (domain_id) should be GrIS (this function now only supports Greenland)');
 	end
 
 	if isempty(experiment_id),
@@ -42,12 +42,8 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%active), so calving-derived outputs are left at fill value throughout.
 	is_historical = strcmpi(experiment_id,'historical');
 
-	%Allowed ISMIP7 resolutions (km): GrIS 1/2/4/8/16, AIS 2/4/8/16
-	if strcmp(icesheetname,'GrIS'),
-		allowed_res=[1 2 4 8 16];
-	else
-		allowed_res=[2 4 8 16];
-	end
+	%Allowed ISMIP7 resolutions (km) for GrIS
+	allowed_res=[1 2 4 8 16];
 	if ~any(resolution_km==allowed_res),
 		error(['resolution_km=' num2str(resolution_km) ' km is not allowed for ' icesheetname ' (allowed: ' num2str(allowed_res) ' km)']);
 	end
@@ -293,20 +289,12 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	if geothermalflux_missing,
 		warning('ISMIP7:nogeoflux','md.basalforcings.geothermalflux is NaN - gridded geothermal flux (hfgeoubed) treated as 0.');
 	end
-	%ISMIP7 standard grids (ISMIP6 domains, EPSG:3413 for GrIS, EPSG:3031 for AIS).
-	%Allowed resolutions (multiples of 2 km): GrIS 1/2/4/8/16 km, AIS 2/4/8/16 km.
+	%ISMIP7 standard grid (ISMIP6 domain, EPSG:3413 for GrIS).
+	%Allowed resolutions (multiples of 1 km): 1/2/4/8/16 km.
 	posting = resolution_km*1000;
-	if strcmp(icesheetname,'GrIS'),
-		%Cell centres from (-720000,-3450000) to (960000,-570000); 1681 x 2881 at 1 km
-		results.gridx  = -720000 :posting: 960000;
-		results.gridy  = -3450000:posting:-570000;
-	elseif strcmp(icesheetname,'AIS'),
-		%Domain corners (-3040000,-3040000) to (3040000,3040000); 761 x 761 at 8 km
-		results.gridx  = -3040000:posting:3040000;
-		results.gridy  = -3040000:posting:3040000;
-	else
-		error('ice sheet not supported yet');
-	end
+	%Cell centres from (-720000,-3450000) to (960000,-570000); 1681 x 2881 at 1 km
+	results.gridx  = -720000 :posting: 960000;
+	results.gridy  = -3450000:posting:-570000;
 
 	%Parameters for InterpFromMeshToGrid (index,x,y,data,xgrid,ygrid,default_value).
 	%Both x and y are ascending: the compliance checker computes grid resolution
@@ -319,57 +307,30 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	results.xcoord = results.gridx;              %x coordinate variable (ascending)
 	results.ycoord = results.gridy;              %y coordinate variable (ascending, matches data)
 
-	if strcmp(icesheetname,'GrIS'),
-		results.thickness= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.surface= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.bed= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.geoflux= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.smb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.bmb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.dhdt= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vxsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vysurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vzsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vxbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vybase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vzbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vxmean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vymean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.surftemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.basetemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.drag= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.calving= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.groundedice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.floatingice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.mask= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	elseif strcmp(icesheetname,'AIS'),
-		results.thickness= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.surface= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.bed= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.geoflux= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.smb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.bmb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.dhdt= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vxsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vysurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vzsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vxbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vybase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vzbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vxmean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.vymean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.surftemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.basetemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.drag= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.calving= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.groundedice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.floatingice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-		results.mask= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	else
-		error('ice sheet not supported yet');
-	end
+	results.thickness= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.surface= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.bed= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.geoflux= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.smb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.bmb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.dhdt= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vxsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vysurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vzsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vxbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vybase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vzbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vxmean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vymean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.surftemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.basetemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.drag= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.calving= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.groundedice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.floatingice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.mask= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 
-	%Extra mandatory ISMIP7 fields handled outside the per-domain loops
+	%Extra mandatory ISMIP7 fields handled outside the main per-timestep loop
 	results.base       = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 	results.sftgif     = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 	%ligroundf: filled below in the per-timestep loops via compute_ligroundf, in every experiment.
@@ -381,308 +342,155 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%melt/refreeze - fill value elsewhere) once sftgrf is available.
 	results.libmassbfgr= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 
-	if strcmp(icesheetname,'GrIS'),
-		for i=1:length(results.timegrid),
-			thickness=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.thickness(:,:,i)=transpose(thickness);
-			base=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.base(:,:,i)=transpose(base);
-			surface=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Surface(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.surface(:,:,i)=transpose(surface);
-			bed=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.bed(:,:,i)=transpose(bed);
-			if geothermalflux_missing,
-				geoflux_mesh = zeros(md.mesh.numberofvertices,1);
-			else
-				geoflux_mesh = md.basalforcings.geothermalflux(1:md.mesh.numberofvertices);
-			end
-			geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
-			results.geoflux(:,:,i)=transpose(geoflux);
-			if i==1,
-				dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.geometry.thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
-			else
-				dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.results.TransientSolution(results.timegrid(i-1)).Thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-md.results.TransientSolution(results.timegrid(i-1)).time),xgrid,ygrid,NaN);
-			end
-			results.dhdt(:,:,i)=transpose(dhdt)/(md.constants.yts);
-			vxsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-			results.vxsurf(:,:,i)=transpose(vxsurf)/md.constants.yts;
-			vysurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-			results.vysurf(:,:,i)=transpose(vysurf)/md.constants.yts;
-			%vzsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-			%results.vzsurf(:,:,i)=transpose(vzsurf)/md.constants.yts;
-			vxbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.vxbase(:,:,i)=transpose(vxbase)/md.constants.yts;
-			vybase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.vybase(:,:,i)=transpose(vybase)/md.constants.yts;
-			%vzbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			%results.vzbase(:,:,i)=transpose(vzbase)/md.constants.yts;
-			vxmean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
+	for i=1:length(results.timegrid),
+		thickness=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.thickness(:,:,i)=transpose(thickness);
+		base=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.base(:,:,i)=transpose(base);
+		surface=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Surface(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.surface(:,:,i)=transpose(surface);
+		bed=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.bed(:,:,i)=transpose(bed);
+		if geothermalflux_missing,
+			geoflux_mesh = zeros(md.mesh.numberofvertices,1);
+		else
+			geoflux_mesh = md.basalforcings.geothermalflux(1:md.mesh.numberofvertices);
+		end
+		geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
+		results.geoflux(:,:,i)=transpose(geoflux);
+		if i==1,
+			dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.geometry.thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
+		else
+			dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.results.TransientSolution(results.timegrid(i-1)).Thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-md.results.TransientSolution(results.timegrid(i-1)).time),xgrid,ygrid,NaN);
+		end
+		results.dhdt(:,:,i)=transpose(dhdt)/(md.constants.yts);
+		vxsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		results.vxsurf(:,:,i)=transpose(vxsurf)/md.constants.yts;
+		vysurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		results.vysurf(:,:,i)=transpose(vysurf)/md.constants.yts;
+		%vzsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		%results.vzsurf(:,:,i)=transpose(vzsurf)/md.constants.yts;
+		vxbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.vxbase(:,:,i)=transpose(vxbase)/md.constants.yts;
+		vybase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.vybase(:,:,i)=transpose(vybase)/md.constants.yts;
+		%vzbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		%results.vzbase(:,:,i)=transpose(vzbase)/md.constants.yts;
+		vxmean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
          results.vxmean(:,:,i)=transpose(vxmean)/md.constants.yts;
-			vymean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
-			results.vymean(:,:,i)=transpose(vymean)/md.constants.yts;
-			surftemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-			results.surftemp(:,:,i)=transpose(surftemp);
-			basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-			results.basetemp(:,:,i)=transpose(basetemp);
-			%Effective pressure clamped at 0: right at flotation, floating-point roundoff
-			%produced tiny negative drag values that failed the ISMIP7 checker.
-			Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices)),0);
-			vel_drag=sqrt(md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices).^2+md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices).^2)/md.constants.yts;
-			drag_mesh=md.friction.coefficient(1:md.mesh.numberofvertices).^2.*Neff_drag.*vel_drag;
-			%With linear Budd friction confirmed (p=q=1), the formula above is the right
-			%physics, so a vertex this far above the checker's 1e6 Pa cap is a data/
-			%inversion artifact (a runaway friction coefficient or a locally noisy
-			%velocity right at a shear margin) rather than a formula error. The ISMIP7
-			%checker tolerates missing values, so these vertices are masked to NaN rather
-			%than clamped to an arbitrary, still-fictitious number.
-			baddrag=find(drag_mesh>1e6);
-			if ~isempty(baddrag),
-				[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
-				warning('md2ismip7:drag',[num2str(numel(baddrag)) ' vertex(es) exceed the 1e6 Pa checker cap at time index ' num2str(i) ...
-					'; masking to NaN. Worst: vertex ' num2str(worst) ' (x=' num2str(md.mesh.x(worst)) ', y=' num2str(md.mesh.y(worst)) '): ' ...
-					num2str(maxdrag) ' Pa. C=' num2str(md.friction.coefficient(worst)) ', N=' num2str(Neff_drag(worst)) ...
-					' Pa, vel=' num2str(vel_drag(worst)*md.constants.yts) ' m/yr - inspect the friction inversion/velocity solve there.']);
-				drag_mesh(baddrag)=NaN;
-			end
-			drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
-			drag(drag<0)=0; %clamp any residual floating-point noise from interpolation (leaves NaN untouched)
-			results.drag(:,:,i)=transpose(drag);
-			%--- calving / ice-front-melt: only meaningful when the front is dynamically
-			%    simulated (see is_historical note above). Built from the raw calving-law
-			%    rate fields (compute_calvingflux, mirroring compute_ligroundf) rather than
-			%    ISSM's own CalvingFluxLevelset/CalvingMeltingFluxLevelset, which are
-			%    normalized to the vertical ice-front FACE area, not the horizontal
-			%    grid-cell area ISMIP7 wants - see compute_calvingflux's header for detail.
-			%    The SCALAR totals below (tendlicalvf/tendlifmassbf) never had this problem
-			%    - Total* never divides by area - and still come from TotalCalvingFluxLevelset/
-			%    TotalCalvingMeltingFluxLevelset as before.
-			if ~is_historical,
-				icels_calv = md.results.TransientSolution(results.timegrid(i)).MaskIceLevelset(1:md.mesh.numberofvertices);
-				crx_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratex(1:md.mesh.numberofvertices);
-				cry_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratey(1:md.mesh.numberofvertices);
-				mr_calv    = md.results.TransientSolution(results.timegrid(i)).CalvingMeltingrate(1:md.mesh.numberofvertices);
-				vx_calv    = md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices);
-				vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
-				thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
-				[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
-				calving=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
-				results.calving(:,:,i)=transpose(calving);
-				frontmelt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
-				results.lifmassbf(:,:,i)=transpose(frontmelt);
-			end
-			mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset(1:md.mesh.numberofvertices),xgrid,ygrid,-1);
-			mask(find(mask>0))=1;
-			mask(find(mask<0))=0;
-			results.mask(:,:,i)=transpose(mask);
-			gl_raw=md.results.TransientSolution(results.timegrid(i)).MaskOceanLevelset(1:md.mesh.numberofvertices);
-			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
-			groundedice(find(groundedice>0))=1;
-			groundedice(find(groundedice<0))=0;
-			floatingice=1-groundedice;
-			groundedice(find(isnan(groundedice)))=0;
-			floatingice(find(isnan(floatingice)))=0;
-			results.groundedice(:,:,i)=transpose(groundedice.*mask);
-			results.floatingice(:,:,i)=transpose(floatingice.*mask);
-			%--- grounding-line flux: physically meaningful in every experiment (unlike
-			%    calving, it is not tied to a prescribed front) ---
-			if has_vxavg,
-				vxgl=md.results.TransientSolution(results.timegrid(i)).VxAverage(1:md.mesh.numberofvertices);
-				vygl=md.results.TransientSolution(results.timegrid(i)).VyAverage(1:md.mesh.numberofvertices);
-			else
-				vxgl=md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices);
-				vygl=md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
-			end
-			thickness_gl=md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
-			lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,thickness_gl,vxgl,vygl,md.materials.rho_ice);
-			ligroundf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
-			results.ligroundf(:,:,i)=transpose(ligroundf);
-			%--- flux fields for this output period: averaged over every raw solution
-			%    stored within it, rather than a single end-of-period snapshot ---
-			bidx = blockidx{i};
-			nb   = numel(bidx);
-			meltfl_sum = zeros(md.mesh.numberofvertices,1);
-			smb_sum    = zeros(md.mesh.numberofvertices,1);
-			for ib=1:nb,
-				kb = bidx(ib);
-				if has_bmbfl,
-					meltfl_sum = meltfl_sum + md.results.TransientSolution(kb).BasalforcingsFloatingiceMeltingRate(1:md.mesh.numberofvertices);
-				end
-				smb_kb = md.results.TransientSolution(kb).SmbMassBalance(end-md.mesh.numberofvertices+1:end);
-				smb_kb(find(smb_kb<-1000))=0;   %clip spurious values (as in the original snapshot approach)
-				smb_sum = smb_sum + smb_kb;
-			end
-			if has_bmbfl,
-				meltfl = meltfl_sum/nb;
-			else
-				meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
-			end
-			bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-			%libmassbffl's fill policy requires missing (not 0) outside floating ice.
-			%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
-			%NaN explicitly so write_gridded_var converts it to _FillValue.
-			bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
-			bmbval(transpose(groundedice)==1)=NaN;
-			results.bmb(:,:,i)=bmbval;
-			smb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
-			results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
+		vymean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
+		results.vymean(:,:,i)=transpose(vymean)/md.constants.yts;
+		surftemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		results.surftemp(:,:,i)=transpose(surftemp);
+		basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		results.basetemp(:,:,i)=transpose(basetemp);
+		%Effective pressure clamped at 0: right at flotation, floating-point roundoff
+		%produced tiny negative drag values that failed the ISMIP7 checker.
+		Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices)),0);
+		vel_drag=sqrt(md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices).^2+md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices).^2)/md.constants.yts;
+		drag_mesh=md.friction.coefficient(1:md.mesh.numberofvertices).^2.*Neff_drag.*vel_drag;
+		%With linear Budd friction confirmed (p=q=1), the formula above is the right
+		%physics, so a vertex this far above the checker's 1e6 Pa cap is a data/
+		%inversion artifact (a runaway friction coefficient or a locally noisy
+		%velocity right at a shear margin) rather than a formula error. The ISMIP7
+		%checker tolerates missing values, so these vertices are masked to NaN rather
+		%than clamped to an arbitrary, still-fictitious number.
+		baddrag=find(drag_mesh>1e6);
+		if ~isempty(baddrag),
+			[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
+			warning('md2ismip7:drag',[num2str(numel(baddrag)) ' vertex(es) exceed the 1e6 Pa checker cap at time index ' num2str(i) ...
+				'; masking to NaN. Worst: vertex ' num2str(worst) ' (x=' num2str(md.mesh.x(worst)) ', y=' num2str(md.mesh.y(worst)) '): ' ...
+				num2str(maxdrag) ' Pa. C=' num2str(md.friction.coefficient(worst)) ', N=' num2str(Neff_drag(worst)) ...
+				' Pa, vel=' num2str(vel_drag(worst)*md.constants.yts) ' m/yr - inspect the friction inversion/velocity solve there.']);
+			drag_mesh(baddrag)=NaN;
 		end
-	elseif strcmp(icesheetname,'AIS'),
-		for i=1:length(results.timegrid),
-			thickness=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Thickness,xgrid,ygrid,NaN);
-			results.thickness(:,:,i)=transpose(thickness);
-			base=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Base,xgrid,ygrid,NaN);
-			results.base(:,:,i)=transpose(base);
-			surface=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Surface,xgrid,ygrid,NaN);
-			results.surface(:,:,i)=transpose(surface);
-			bed=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed,xgrid,ygrid,NaN);
-			results.bed(:,:,i)=transpose(bed);
-			if geothermalflux_missing,
-				geoflux_mesh = zeros(md.mesh.numberofvertices,1);
-			else
-				geoflux_mesh = md.basalforcings.geothermalflux;
-			end
-			geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
-			results.geoflux(:,:,i)=transpose(geoflux);
-			if i==1,
-				dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness-md.geometry.thickness)/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
-			else
-				dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness-md.results.TransientSolution(results.timegrid(i-1)).Thickness)/(md.results.TransientSolution(results.timegrid(i)).time-md.results.TransientSolution(results.timegrid(i-1)).time),xgrid,ygrid,NaN);
-			end
-			results.dhdt(:,:,i)=transpose(dhdt)/(md.constants.yts);
-			vxsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
-			results.vxsurf(:,:,i)=transpose(vxsurf)/md.constants.yts;
-			vysurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
-			results.vysurf(:,:,i)=transpose(vysurf)/md.constants.yts;
-			%vzsurf=zeros(nlines,ncols);
-			%vzsurf=NaN*ones(nlines,ncols);
-			%results.vzsurf(:,:,i)=transpose(vzsurf)/md.constants.yts;
-			vxbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
-			results.vxbase(:,:,i)=transpose(vxbase)/md.constants.yts;
-			vybase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
-			results.vybase(:,:,i)=transpose(vybase)/md.constants.yts;
-			%vzbase=NaN*ones(nlines,ncols);
-			%results.vzbase(:,:,i)=transpose(vzbase)/md.constants.yts;
-			vxmean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
-			results.vxmean(:,:,i)=transpose(vxmean)/md.constants.yts;
-			vymean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
-			results.vymean(:,:,i)=transpose(vymean)/md.constants.yts;
-			surftemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature,xgrid,ygrid,NaN);
-			results.surftemp(:,:,i)=transpose(surftemp);
-			%AIS mesh has no vertical resolution, so there is no distinct basal
-			%temperature to interpolate (it would just duplicate surftemp, which is
-			%physically wrong) - left as a fill placeholder until a real basal
-			%temperature field is available for this domain.
-			basetemp=NaN*ones(nlines,ncols);
-			results.basetemp(:,:,i)=transpose(basetemp);
-			%Effective pressure clamped at 0: rho_ice*H+rho_water*Base crosses zero right
-			%at flotation, and floating-point roundoff there was producing tiny negative
-			%drag values that failed the ISMIP7 checker.
-			Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base),0);
-			vel_drag=md.results.TransientSolution(results.timegrid(i)).Vel/md.constants.yts;
-			drag_mesh=md.friction.coefficient.^2.*Neff_drag.*vel_drag;
-			%With linear Budd friction confirmed (p=q=1), the formula above is the right
-			%physics, so a vertex this far above the checker's 1e6 Pa cap is a data/
-			%inversion artifact (a runaway friction coefficient or a locally noisy
-			%velocity right at a shear margin) rather than a formula error. The ISMIP7
-			%checker tolerates missing values, so these vertices are masked to NaN rather
-			%than clamped to an arbitrary, still-fictitious number.
-			baddrag=find(drag_mesh>1e6);
-			if ~isempty(baddrag),
-				[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
-				warning('md2ismip7:drag',[num2str(numel(baddrag)) ' vertex(es) exceed the 1e6 Pa checker cap at time index ' num2str(i) ...
-					'; masking to NaN. Worst: vertex ' num2str(worst) ' (x=' num2str(md.mesh.x(worst)) ', y=' num2str(md.mesh.y(worst)) '): ' ...
-					num2str(maxdrag) ' Pa. C=' num2str(md.friction.coefficient(worst)) ', N=' num2str(Neff_drag(worst)) ...
-					' Pa, vel=' num2str(vel_drag(worst)*md.constants.yts) ' m/yr - inspect the friction inversion/velocity solve there.']);
-				drag_mesh(baddrag)=NaN;
-			end
-			drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
-			drag(drag<0)=0; %clamp any residual floating-point noise from interpolation (leaves NaN untouched)
-			results.drag(:,:,i)=transpose(drag);
-			%--- calving / ice-front-melt: only meaningful when the front is dynamically
-			%    simulated (see is_historical note above). Built from the raw calving-law
-			%    rate fields (compute_calvingflux, mirroring compute_ligroundf) - see the
-			%    matching GrIS comment above for why this replaces ISSM's own
-			%    CalvingFluxLevelset/CalvingMeltingFluxLevelset for the gridded fields.
-			%    AIS is a 2D model here, so Vx/Vy are used directly (matches the plain
-			%    Vx/Vy that Tria::CalvingMeltingFluxLevelset itself uses for the melt
-			%    direction, as opposed to the depth-averaged velocity grounding line needs).
-			if ~is_historical,
-				icels_calv = md.results.TransientSolution(results.timegrid(i)).MaskIceLevelset;
-				crx_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratex;
-				cry_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratey;
-				mr_calv    = md.results.TransientSolution(results.timegrid(i)).CalvingMeltingrate;
-				vx_calv    = md.results.TransientSolution(results.timegrid(i)).Vx;
-				vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy;
-				thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness;
-				[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
-				calving=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
-				results.calving(:,:,i)=transpose(calving);
-				frontmelt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
-				results.lifmassbf(:,:,i)=transpose(frontmelt);
-			end
-			mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset,xgrid,ygrid,-1);
-			mask(find(mask>0))=1;
-			mask(find(mask<0))=-1;
-			results.mask(:,:,i)=transpose(mask);
-			%NOTE: assumes MaskGroundediceLevelset follows the same sign convention as
-			%MaskOceanLevelset used in the GrIS branch (>0 grounded, <0 floating) - worth
-			%double-checking against your ISSM version if the grounding-line results look off.
-			gl_raw=md.results.TransientSolution(results.timegrid(i)).MaskGroundediceLevelset;
-			groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
-			groundedice(find(groundedice>0))=1;
-			groundedice(find(groundedice<0))=0;
-			%MaskGroundediceLevelset only encodes grounded-vs-floating (bed vs sea level)
-			%- it has no notion of ice presence, so ice-free rock above sea level (e.g.
-			%exposed mountains) would otherwise be flagged as "grounded" here. Multiply
-			%by the true ice-extent indicator (mask>0, from ice_levelset) before storing
-			%- matching the fix already applied in the GrIS branch above. The raw
-			%(unmasked) local groundedice variable is left as-is for the bmb weighting
-			%below, where 1-groundedice already correctly evaluates to 0 over ice-free land.
-			icemask=double(mask>0);
-			results.groundedice(:,:,i)=transpose(groundedice.*icemask);
-			results.floatingice(:,:,i)=transpose((1-groundedice).*icemask);
-			%--- grounding-line flux: physically meaningful in every experiment (unlike
-			%    calving, it is not tied to a prescribed front). AIS is a 2D model here,
-			%    so Vx/Vy are already the depth average - no VxAverage/VyAverage needed. ---
-			lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,md.results.TransientSolution(results.timegrid(i)).Thickness,md.results.TransientSolution(results.timegrid(i)).Vx,md.results.TransientSolution(results.timegrid(i)).Vy,md.materials.rho_ice);
-			ligroundf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
-			results.ligroundf(:,:,i)=transpose(ligroundf);
-			%--- flux fields for this output period: averaged over every raw solution
-			%    stored within it, rather than a single end-of-period snapshot ---
-			bidx = blockidx{i};
-			nb   = numel(bidx);
-			meltfl_sum = zeros(md.mesh.numberofvertices,1);
-			smb_sum    = zeros(md.mesh.numberofvertices,1);
-			for ib=1:nb,
-				kb = bidx(ib);
-				if has_bmbfl,
-					meltfl_sum = meltfl_sum + md.results.TransientSolution(kb).BasalforcingsFloatingiceMeltingRate(1:md.mesh.numberofvertices);
-				end
-				smb_sum = smb_sum + md.results.TransientSolution(kb).SmbMassBalance;
-			end
-			if has_bmbfl,
-				meltfl = meltfl_sum/nb;
-			else
-				meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
-			end
-			bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-			%libmassbffl's fill policy requires missing (not 0) outside floating ice.
-			%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
-			%NaN explicitly so write_gridded_var converts it to _FillValue.
-			bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
-			bmbval(transpose(groundedice)==1)=NaN;
-			results.bmb(:,:,i)=bmbval;
-			smb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
-			results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
+		drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
+		drag(drag<0)=0; %clamp any residual floating-point noise from interpolation (leaves NaN untouched)
+		results.drag(:,:,i)=transpose(drag);
+		%--- calving / ice-front-melt: only meaningful when the front is dynamically
+		%    simulated (see is_historical note above). Built from the raw calving-law
+		%    rate fields (compute_calvingflux, mirroring compute_ligroundf) rather than
+		%    ISSM's own CalvingFluxLevelset/CalvingMeltingFluxLevelset, which are
+		%    normalized to the vertical ice-front FACE area, not the horizontal
+		%    grid-cell area ISMIP7 wants - see compute_calvingflux's header for detail.
+		%    The SCALAR totals below (tendlicalvf/tendlifmassbf) never had this problem
+		%    - Total* never divides by area - and still come from TotalCalvingFluxLevelset/
+		%    TotalCalvingMeltingFluxLevelset as before.
+		if ~is_historical,
+			icels_calv = md.results.TransientSolution(results.timegrid(i)).MaskIceLevelset(1:md.mesh.numberofvertices);
+			crx_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratex(1:md.mesh.numberofvertices);
+			cry_calv   = md.results.TransientSolution(results.timegrid(i)).Calvingratey(1:md.mesh.numberofvertices);
+			mr_calv    = md.results.TransientSolution(results.timegrid(i)).CalvingMeltingrate(1:md.mesh.numberofvertices);
+			vx_calv    = md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices);
+			vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
+			thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
+			[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
+			calving=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+			results.calving(:,:,i)=transpose(calving);
+			frontmelt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
+			results.lifmassbf(:,:,i)=transpose(frontmelt);
 		end
-	else
-		error('ice sheet not supported yet');
+		mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset(1:md.mesh.numberofvertices),xgrid,ygrid,-1);
+		mask(find(mask>0))=1;
+		mask(find(mask<0))=0;
+		results.mask(:,:,i)=transpose(mask);
+		gl_raw=md.results.TransientSolution(results.timegrid(i)).MaskOceanLevelset(1:md.mesh.numberofvertices);
+		groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
+		groundedice(find(groundedice>0))=1;
+		groundedice(find(groundedice<0))=0;
+		floatingice=1-groundedice;
+		groundedice(find(isnan(groundedice)))=0;
+		floatingice(find(isnan(floatingice)))=0;
+		results.groundedice(:,:,i)=transpose(groundedice.*mask);
+		results.floatingice(:,:,i)=transpose(floatingice.*mask);
+		%--- grounding-line flux: physically meaningful in every experiment (unlike
+		%    calving, it is not tied to a prescribed front) ---
+		if has_vxavg,
+			vxgl=md.results.TransientSolution(results.timegrid(i)).VxAverage(1:md.mesh.numberofvertices);
+			vygl=md.results.TransientSolution(results.timegrid(i)).VyAverage(1:md.mesh.numberofvertices);
+		else
+			vxgl=md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices);
+			vygl=md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
+		end
+		thickness_gl=md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
+		lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,thickness_gl,vxgl,vygl,md.materials.rho_ice);
+		ligroundf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+		results.ligroundf(:,:,i)=transpose(ligroundf);
+		%--- flux fields for this output period: averaged over every raw solution
+		%    stored within it, rather than a single end-of-period snapshot ---
+		bidx = blockidx{i};
+		nb   = numel(bidx);
+		meltfl_sum = zeros(md.mesh.numberofvertices,1);
+		smb_sum    = zeros(md.mesh.numberofvertices,1);
+		for ib=1:nb,
+			kb = bidx(ib);
+			if has_bmbfl,
+				meltfl_sum = meltfl_sum + md.results.TransientSolution(kb).BasalforcingsFloatingiceMeltingRate(1:md.mesh.numberofvertices);
+			end
+			smb_kb = md.results.TransientSolution(kb).SmbMassBalance(end-md.mesh.numberofvertices+1:end);
+			smb_kb(find(smb_kb<-1000))=0;   %clip spurious values (as in the original snapshot approach)
+			smb_sum = smb_sum + smb_kb;
+		end
+		if has_bmbfl,
+			meltfl = meltfl_sum/nb;
+		else
+			meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
+		end
+		bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
+		%libmassbffl's fill policy requires missing (not 0) outside floating ice.
+		%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
+		%NaN explicitly so write_gridded_var converts it to _FillValue.
+		bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
+		bmbval(transpose(groundedice)==1)=NaN;
+		results.bmb(:,:,i)=bmbval;
+		smb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
+		results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
 	end
 	%}}}
 
 	%Gridded output: derive mask fractions, build the gridded time axes, then write
 	%one file per mandatory variable (ISMIP7 requires a single main variable per file).
-	icepresent = double(results.mask>0);                %1 where ice present, 0 elsewhere (both domains)
+	icepresent = double(results.mask>0);                %1 where ice present, 0 elsewhere
 	results.sftgif = icepresent;                         %land ice area fraction
 	results.sftgrf = results.groundedice .* icepresent;  %grounded fraction, 0 outside ice
 	results.sftflf = results.floatingice .* icepresent;  %floating fraction, 0 outside ice
@@ -787,11 +595,7 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 
 function ismip7_global_attributes(ncid,source_id,ism_id,domain_id)
 	%Mandatory ISMIP7 global attributes (see conventions section 5)
-	if strcmp(domain_id,'GrIS'),
-		crs='epsg:3413';
-	else
-		crs='epsg:3031';
-	end
+	crs='epsg:3413'; %GrIS only
 	g=netcdf.getConstant('NC_GLOBAL');
 	netcdf.putAtt(ncid,g,'group',source_id);
 	netcdf.putAtt(ncid,g,'model',ism_id);
