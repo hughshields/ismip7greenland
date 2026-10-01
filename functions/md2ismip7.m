@@ -97,7 +97,7 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 			error(['md.miscellaneous.name (''' runname ''') is missing the experiment_id ' ...
 				'token (expected Greenland_ISMIP7Run_<esm_id>_<experiment_id>...)']);
 		end
-		experiment_id = nameparts{4};
+		experiment_id = lower(nameparts{4}); %ISMIP7 naming wants this lowercase, e.g. 'historical', 'ssp370'
 	end
 
 	%Calving/ice-front-melt diagnostics are only physically meaningful when the
