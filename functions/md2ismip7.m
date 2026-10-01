@@ -594,7 +594,12 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 		end
 		thickness_gl=md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
 		lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,thickness_gl,vxgl,vygl,md.materials.rho_ice);
-		ligroundf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+		%ligroundf's fill_policy is 'forbidden' (never missing, anywhere in the domain) - lig_elem
+		%is already 0 for every element the grounding line doesn't cross, so the only source of
+		%NaN here would be interp_quiet's default for grid points outside the mesh footprint
+		%(most of the output grid, since it spans a bounding box well beyond the ice extent).
+		%Default those to 0 flux instead of NaN so the checker's missing-value test is satisfied.
+		ligroundf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,0);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
 		results.ligroundf(:,:,i)=transpose(ligroundf);
 		%--- flux fields for this output period: averaged over every raw solution
 		%    stored within it, rather than a single end-of-period snapshot ---
@@ -617,11 +622,13 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 			meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
 		end
 		bmb=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
-		%libmassbffl's fill policy requires missing (not 0) outside floating ice.
-		%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
-		%NaN explicitly so write_gridded_var converts it to _FillValue.
+		%libmassbffl's fill policy (no_floating_ice) requires missing (not 0) everywhere
+		%that is NOT floating ice - that's wherever sftflf will end up 0, i.e. grounded ice
+		%OR no ice at all. Masking only on groundedice==1 missed the ice-free case (cells the
+		%raw ocean levelset happens to sign "floating" even though there is no ice there),
+		%which is what the checker's "holds a value where sftflf is 0" error was catching.
 		bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
-		bmbval(transpose(groundedice)==1)=NaN;
+		bmbval(transpose(floatingice.*mask)==0)=NaN;
 		results.bmb(:,:,i)=bmbval;
 		smb=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
 		results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
@@ -657,6 +664,11 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 	%mismatch for the checker.
 	fullygrounded = results.sftgrf==1;
 	results.base(fullygrounded) = results.bed(fullygrounded);
+	%orog (surface) was interpolated independently from the mesh's Surface field, so forcing
+	%base=bed above - without touching surface - breaks the orog=base+lithk identity the
+	%checker requires, by however much bed differs from the original interpolated base at
+	%that cell. Re-sync surface here so the identity holds exactly wherever base was forced.
+	results.surface(fullygrounded) = results.base(fullygrounded) + results.thickness(fullygrounded);
 
 	%libmassbfgr: this model does not simulate basal melt/refreeze under grounded ice, so
 	%the value is a genuine physical 0 (not a missing computation) everywhere grounded ice
