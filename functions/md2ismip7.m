@@ -73,13 +73,20 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 	icesheetname='GrIS';
 
 	%Parse esm_id and experiment_id out of md.miscellaneous.name (see the header comment above
-	%for the expected naming convention).
-	if ~isfield(md,'miscellaneous') || ~isfield(md.miscellaneous,'name') || isempty(md.miscellaneous.name),
+	%for the expected naming convention). md is an ISSM model object (not a plain struct), so
+	%isfield() can't be used to check for the property - try/catch works for both a struct and
+	%a classdef object.
+	try
+		runname = md.miscellaneous.name;
+	catch
 		error('md.miscellaneous.name must be set, e.g. Greenland_ISMIP7Run_CESM2-WACCM_SSP370');
 	end
-	nameparts = strsplit(md.miscellaneous.name,'_');
+	if isempty(runname),
+		error('md.miscellaneous.name must be set, e.g. Greenland_ISMIP7Run_CESM2-WACCM_SSP370');
+	end
+	nameparts = strsplit(runname,'_');
 	if numel(nameparts)<3,
-		error(['md.miscellaneous.name (''' md.miscellaneous.name ''') does not follow the expected ' ...
+		error(['md.miscellaneous.name (''' runname ''') does not follow the expected ' ...
 			'Greenland_ISMIP7Run_<esm_id>_<experiment_id> or Greenland_ISMIP7Prep_OCX pattern']);
 	end
 	esm_id = nameparts{3};
@@ -87,7 +94,7 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 		experiment_id=''; %the OCX ocean-forcing prep run has no experiment_id
 	else
 		if numel(nameparts)<4,
-			error(['md.miscellaneous.name (''' md.miscellaneous.name ''') is missing the experiment_id ' ...
+			error(['md.miscellaneous.name (''' runname ''') is missing the experiment_id ' ...
 				'token (expected Greenland_ISMIP7Run_<esm_id>_<experiment_id>...)']);
 		end
 		experiment_id = nameparts{4};
