@@ -1,26 +1,67 @@
-function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_member_id,esm_id,forcing_member_id,experiment_id,set_counter,time_range,resolution_km,output_interval_yr);
-	%Create netcdf files for an experiment following ISMIP7 conventions
+function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forcing_member_id,set_counter_override,time_range,resolution_km,output_interval_yr);
+	%Create netcdf files for an experiment following ISMIP7 conventions, for Greenland (GrIS) only.
 	%
-	%directoryname:      base output directory (ISMIP7 subdirectories are created below it)
-	%icesheetname:       domain_id, 'GrIS' (Greenland only; Antarctica support removed)
-	%source_id:          modelling group name (no '_', '.' or special characters)
-	%ism_id:             ice sheet model name and version (no '_', '.' or special characters)
-	%ism_member_id:      ISM choice variant, e.g. 'm001'
-	%esm_id:             CMIP/ESM model name, e.g. 'CESM2-WACCM'
-	%forcing_member_id:  forcing choice variant, e.g. 'f001'
-	%experiment_id:      'historical', 'ctrl', 'ssp126', ...
-	%set_counter:        unique index within a set, e.g. 'C001', 'E001', 'P001'
-	%time_range:         start-end year of the experiment, e.g. '2015-2300' (optional;
-	%                    auto-derived from the model output years if empty/omitted)
-	%resolution_km:      output grid resolution in km (optional, default 8).
-	%                    Allowed: 1/2/4/8/16 km.
-	%output_interval_yr: interval in years between 2-D (gridded) output snapshots
-	%                    (optional, default 1). Scalars are always annual.
+	%directoryname:        base output directory (ISMIP7 subdirectories are created below it)
+	%source_id:            modelling group name (no '_', '.' or special characters)
+	%                      (optional, default 'Dartmouth')
+	%ism_id:               ice sheet model name and version (no '_', '.' or special characters)
+	%                      (optional, default 'ISSM')
+	%ism_member_id:        ISM choice variant, e.g. 'm001' (optional, default 'm001')
+	%forcing_member_id:    forcing choice variant, e.g. 'f001' (optional, default 'f001')
+	%set_counter_override: ISMIP7 set_counter (e.g. 'E001', 'P001') to use INSTEAD of the Core
+	%                      experiment automatically matched below (optional; leave empty/omitted
+	%                      to default to the matching Core run, e.g. 'C003')
+	%time_range:           start-end year of the experiment, e.g. '2015-2300' (optional;
+	%                      auto-derived from the model output years if empty/omitted)
+	%resolution_km:        output grid resolution in km (optional, default 1).
+	%                      Allowed: 1/2/4/8/16 km.
+	%output_interval_yr:   interval in years between 2-D (gridded) output snapshots
+	%                      (optional, default 1). Scalars are always annual.
+	%
+	%esm_id and experiment_id are no longer passed in directly - they are parsed from
+	%md.miscellaneous.name, which every model input to this function must set, following:
+	%   Greenland_ISMIP7Run_<esm_id>_<experiment_id>[_<anything else, e.g. a year range>]
+	%   Greenland_ISMIP7Prep_OCX                       (the ocean-forcing prep run; no experiment_id)
+	%e.g. Greenland_ISMIP7Run_CESM2-WACCM_SSP370_2015-2101
+	%     Greenland_ISMIP7Run_MRI-ESM2-0_Historical
+	%     Greenland_ISMIP7Prep_OCX
+	%
+	%set_counter is likewise no longer passed in: by default this function assumes a Core
+	%experiment and looks up the matching C0xx code from esm_id/experiment_id using the table
+	%below; pass set_counter_override to use an ESM-sensitivity ('Exxx') or PPE ('Pxxx') code
+	%instead.
+	%  Core  Experiment   Start year  End year  ESM
+	%  C001  Historical   >=1850      2014      CESM2-WACCM
+	%  C002  Historical   >=1850      2014      MRI-ESM2-0
+	%  C003  SSP370       2015        2100      CESM2-WACCM
+	%  C004  SSP370       2015        2100      MRI-ESM2-0
+	%  C005  SSP126       2015        2300      CESM2-WACCM
+	%  C006  SSP126       2015        2300      MRI-ESM2-0
+	%  C007  SSP585       2015        2300      CESM2-WACCM
+	%  C008  SSP585       2015        2300      MRI-ESM2-0
+	%  C009  CTRL2015     >=1850      2300      CESM2-WACCM
+	%  C010  CTRL2015     >=1850      2300      MRI-ESM2-0
+	%  C011  OCX          1990-2015   2025      -
 
-	if nargin<12 || isempty(resolution_km),
-		resolution_km=8; %default GrIS resolution
+	if nargin<3 || isempty(source_id),
+		source_id='Dartmouth';
 	end
-	if nargin<13 || isempty(output_interval_yr),
+	if nargin<4 || isempty(ism_id),
+		ism_id='ISSM';
+	end
+	if nargin<5 || isempty(ism_member_id),
+		ism_member_id='m001';
+	end
+	if nargin<6 || isempty(forcing_member_id),
+		forcing_member_id='f001';
+	end
+	if nargin<7 || isempty(set_counter_override),
+		set_counter_override='';
+	end
+	if nargin<9 || isempty(resolution_km),
+		resolution_km=1; %default GrIS resolution
+	end
+	if nargin<10 || isempty(output_interval_yr),
 		output_interval_yr=1;
 	end
 
@@ -28,12 +69,28 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		error(['directory ' directoryname ' does not exist']);
 	end
 
-	if ~strcmp(icesheetname,'GrIS'),
-		error('icesheetname (domain_id) should be GrIS (this function now only supports Greenland)');
-	end
+	%This function now only supports Greenland - the domain_id is fixed rather than passed in.
+	icesheetname='GrIS';
 
-	if isempty(experiment_id),
-		error('experiment_id must be provided (e.g. historical, ctrl, ssp126)');
+	%Parse esm_id and experiment_id out of md.miscellaneous.name (see the header comment above
+	%for the expected naming convention).
+	if ~isfield(md,'miscellaneous') || ~isfield(md.miscellaneous,'name') || isempty(md.miscellaneous.name),
+		error('md.miscellaneous.name must be set, e.g. Greenland_ISMIP7Run_CESM2-WACCM_SSP370');
+	end
+	nameparts = strsplit(md.miscellaneous.name,'_');
+	if numel(nameparts)<3,
+		error(['md.miscellaneous.name (''' md.miscellaneous.name ''') does not follow the expected ' ...
+			'Greenland_ISMIP7Run_<esm_id>_<experiment_id> or Greenland_ISMIP7Prep_OCX pattern']);
+	end
+	esm_id = nameparts{3};
+	if strcmpi(esm_id,'OCX'),
+		experiment_id=''; %the OCX ocean-forcing prep run has no experiment_id
+	else
+		if numel(nameparts)<4,
+			error(['md.miscellaneous.name (''' md.miscellaneous.name ''') is missing the experiment_id ' ...
+				'token (expected Greenland_ISMIP7Run_<esm_id>_<experiment_id>...)']);
+		end
+		experiment_id = nameparts{4};
 	end
 
 	%Calving/ice-front-melt diagnostics are only physically meaningful when the
@@ -48,6 +105,40 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		error(['resolution_km=' num2str(resolution_km) ' km is not allowed for ' icesheetname ' (allowed: ' num2str(allowed_res) ' km)']);
 	end
 
+	%set_counter: default to the Core experiment matching esm_id/experiment_id (see table in the
+	%header comment above), unless set_counter_override was provided.
+	if ~isempty(set_counter_override),
+		set_counter = set_counter_override;
+	elseif strcmpi(esm_id,'OCX'),
+		set_counter = 'C011';
+	else
+		if ~isempty(regexpi(esm_id,'CESM')),
+			esmgroup='CESM';
+		elseif ~isempty(regexpi(esm_id,'MRI')),
+			esmgroup='MRI';
+		else
+			error(['esm_id ''' esm_id ''' (parsed from md.miscellaneous.name) is not recognized as a Core ' ...
+				'ESM (expected a CESM2-WACCM or MRI-ESM2-0 variant, or OCX) - pass set_counter_override explicitly.']);
+		end
+		core_table = {
+			'historical', 'CESM', 'C001';
+			'historical', 'MRI',  'C002';
+			'ssp370',     'CESM', 'C003';
+			'ssp370',     'MRI',  'C004';
+			'ssp126',     'CESM', 'C005';
+			'ssp126',     'MRI',  'C006';
+			'ssp585',     'CESM', 'C007';
+			'ssp585',     'MRI',  'C008';
+			'ctrl2015',   'CESM', 'C009';
+			'ctrl2015',   'MRI',  'C010';
+		};
+		match = find(strcmpi(core_table(:,1),experiment_id) & strcmp(core_table(:,2),esmgroup));
+		if isempty(match),
+			error(['No Core ISMIP7 experiment found for experiment_id=''' experiment_id ''' and esm_id=''' esm_id '''' ...
+				' - pass set_counter_override explicitly for a non-Core (ESM/PPE) run.']);
+		end
+		set_counter = core_table{match,3};
+	end
 
 	%ISMIP7 output directory structure: <domain_id>/<source_id>/<ism_id>/<set_id>/<set_counter>/
 	switch upper(set_counter(1))
@@ -64,7 +155,7 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%Derive <time_range> from the model output years if it was not supplied. Uses
 	%floor(TransientSolution.time), so it assumes .time is in (absolute) calendar years;
 	%if your times are relative to the run start, pass time_range explicitly instead.
-	if nargin<11 || isempty(time_range),
+	if nargin<8 || isempty(time_range),
 		%Drop the last stored solution before deriving the year range: it is the
 		%branch/handoff instant shared with whatever comes next (e.g. a historical
 		%run's array ending at exactly 2015.0 really just marks "as of Jan 1 2015",
@@ -81,7 +172,17 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 
 	%ISMIP7 filename builder:
 	%<variable_id>_<domain_id>_<source_id>_<ism_id>_<ISM_member_id>_<ESM_id>_<forcing_member_id>_<experiment_id>_<set_counter>_<time_range>.nc
-	mkfname = @(variable_id) fullfile(outdir,[variable_id '_' icesheetname '_' source_id '_' ism_id '_' ism_member_id '_' esm_id '_' forcing_member_id '_' experiment_id '_' set_counter '_' time_range '.nc']);
+	%(the experiment_id token is omitted for the OCX run, which has none)
+	fname_tokens = {icesheetname,source_id,ism_id,ism_member_id,esm_id,forcing_member_id};
+	if ~isempty(experiment_id),
+		fname_tokens{end+1} = experiment_id;
+	end
+	fname_tokens(end+1:end+2) = {set_counter,time_range};
+	fname_base = fname_tokens{1};
+	for k=2:numel(fname_tokens),
+		fname_base = [fname_base '_' fname_tokens{k}];
+	end
+	mkfname = @(variable_id) fullfile(outdir,[variable_id '_' fname_base '.nc']);
 
 	%Scalar variables %{{{
 	%ISMIP7 wants annual output, with two different time-registration rules
@@ -237,7 +338,13 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		'tendligroundf',   '',                                                      'kg s-1', results.gltot,        true;
 	};
 
+	%tendlicalvf/tendlifmassbf are not computed for historical runs (the front is prescribed -
+	%see is_historical above), so rather than writing a file full of fill value, skip it entirely.
+	historical_skip_vars = {'tendlicalvf','tendlifmassbf'};
 	for v=1:size(scalar_vars,1),
+		if is_historical && any(strcmp(scalar_vars{v,1},historical_skip_vars)),
+			continue;
+		end
 		if scalar_vars{v,5},
 			t=time_flux; b=time_flux_bnds;
 		else
@@ -342,47 +449,63 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	%melt/refreeze - fill value elsewhere) once sftgrf is available.
 	results.libmassbfgr= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 
+	%Accumulator for the "exceeds 1e6 Pa checker cap" drag warning: rather than firing a
+	%warning every time this happens (it can trigger on many vertices in many timesteps for a
+	%single run), the per-timestep detail below is logged silently and a single summary
+	%warning is raised once, after the loop, with the worst offender across the whole run.
+	drag_cap_summary = struct('noccurrences',0,'nvertices_total',0,'worst_value',-Inf, ...
+		'worst_vertex',[],'worst_time_index',[],'worst_x',[],'worst_y',[],'worst_C',[],'worst_N',[],'worst_vel',[]);
+
 	for i=1:length(results.timegrid),
-		thickness=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		%One informative line per output period instead of letting InterpFromMeshToGrid
+		%print its own uninformative "interpolation progress: XX.XX%" for each of the ~20
+		%fields interpolated below (that call is wrapped in interp_quiet, which swallows it).
+		if block_y0(i)==block_y1(i),
+			yearlabel = sprintf('%d',block_y0(i));
+		else
+			yearlabel = sprintf('%d-%d',block_y0(i),block_y1(i));
+		end
+		fprintf('md2ismip7: gridding GrIS fields for %s (period %d/%d)\n',yearlabel,i,noutput);
+		thickness=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.thickness(:,:,i)=transpose(thickness);
-		base=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		base=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.base(:,:,i)=transpose(base);
-		surface=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Surface(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		surface=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Surface(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.surface(:,:,i)=transpose(surface);
-		bed=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		bed=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.bed(:,:,i)=transpose(bed);
 		if geothermalflux_missing,
 			geoflux_mesh = zeros(md.mesh.numberofvertices,1);
 		else
 			geoflux_mesh = md.basalforcings.geothermalflux(1:md.mesh.numberofvertices);
 		end
-		geoflux=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
+		geoflux=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
 		results.geoflux(:,:,i)=transpose(geoflux);
 		if i==1,
-			dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.geometry.thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
+			dhdt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.geometry.thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
 		else
-			dhdt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.results.TransientSolution(results.timegrid(i-1)).Thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-md.results.TransientSolution(results.timegrid(i-1)).time),xgrid,ygrid,NaN);
+			dhdt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.results.TransientSolution(results.timegrid(i-1)).Thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-md.results.TransientSolution(results.timegrid(i-1)).time),xgrid,ygrid,NaN);
 		end
 		results.dhdt(:,:,i)=transpose(dhdt)/(md.constants.yts);
-		vxsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		vxsurf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
 		results.vxsurf(:,:,i)=transpose(vxsurf)/md.constants.yts;
-		vysurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		vysurf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
 		results.vysurf(:,:,i)=transpose(vysurf)/md.constants.yts;
-		%vzsurf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		%vzsurf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
 		%results.vzsurf(:,:,i)=transpose(vzsurf)/md.constants.yts;
-		vxbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		vxbase=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.vxbase(:,:,i)=transpose(vxbase)/md.constants.yts;
-		vybase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		vybase=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.vybase(:,:,i)=transpose(vybase)/md.constants.yts;
-		%vzbase=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		%vzbase=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		%results.vzbase(:,:,i)=transpose(vzbase)/md.constants.yts;
-		vxmean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
+		vxmean=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
          results.vxmean(:,:,i)=transpose(vxmean)/md.constants.yts;
-		vymean=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
+		vymean=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
 		results.vymean(:,:,i)=transpose(vymean)/md.constants.yts;
-		surftemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
+		surftemp=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
 		results.surftemp(:,:,i)=transpose(surftemp);
-		basetemp=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
+		basetemp=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.basetemp(:,:,i)=transpose(basetemp);
 		%Effective pressure clamped at 0: right at flotation, floating-point roundoff
 		%produced tiny negative drag values that failed the ISMIP7 checker.
@@ -398,13 +521,23 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		baddrag=find(drag_mesh>1e6);
 		if ~isempty(baddrag),
 			[maxdrag,maxi]=max(drag_mesh(baddrag)); worst=baddrag(maxi);
-			warning('md2ismip7:drag',[num2str(numel(baddrag)) ' vertex(es) exceed the 1e6 Pa checker cap at time index ' num2str(i) ...
-				'; masking to NaN. Worst: vertex ' num2str(worst) ' (x=' num2str(md.mesh.x(worst)) ', y=' num2str(md.mesh.y(worst)) '): ' ...
-				num2str(maxdrag) ' Pa. C=' num2str(md.friction.coefficient(worst)) ', N=' num2str(Neff_drag(worst)) ...
-				' Pa, vel=' num2str(vel_drag(worst)*md.constants.yts) ' m/yr - inspect the friction inversion/velocity solve there.']);
+			%Logged into drag_cap_summary rather than warned here - see the summary
+			%warning issued once, after the loop, below.
+			drag_cap_summary.noccurrences    = drag_cap_summary.noccurrences + 1;
+			drag_cap_summary.nvertices_total = drag_cap_summary.nvertices_total + numel(baddrag);
+			if maxdrag > drag_cap_summary.worst_value,
+				drag_cap_summary.worst_value      = maxdrag;
+				drag_cap_summary.worst_vertex      = worst;
+				drag_cap_summary.worst_time_index  = i;
+				drag_cap_summary.worst_x           = md.mesh.x(worst);
+				drag_cap_summary.worst_y           = md.mesh.y(worst);
+				drag_cap_summary.worst_C           = md.friction.coefficient(worst);
+				drag_cap_summary.worst_N           = Neff_drag(worst);
+				drag_cap_summary.worst_vel         = vel_drag(worst)*md.constants.yts;
+			end
 			drag_mesh(baddrag)=NaN;
 		end
-		drag=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
+		drag=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,drag_mesh,xgrid,ygrid,NaN);
 		drag(drag<0)=0; %clamp any residual floating-point noise from interpolation (leaves NaN untouched)
 		results.drag(:,:,i)=transpose(drag);
 		%--- calving / ice-front-melt: only meaningful when the front is dynamically
@@ -425,17 +558,17 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 			vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
 			thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
 			[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
-			calving=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+			calving=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
 			results.calving(:,:,i)=transpose(calving);
-			frontmelt=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
+			frontmelt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
 			results.lifmassbf(:,:,i)=transpose(frontmelt);
 		end
-		mask=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset(1:md.mesh.numberofvertices),xgrid,ygrid,-1);
+		mask=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset(1:md.mesh.numberofvertices),xgrid,ygrid,-1);
 		mask(find(mask>0))=1;
 		mask(find(mask<0))=0;
 		results.mask(:,:,i)=transpose(mask);
 		gl_raw=md.results.TransientSolution(results.timegrid(i)).MaskOceanLevelset(1:md.mesh.numberofvertices);
-		groundedice=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
+		groundedice=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,xgrid,ygrid,NaN);
 		groundedice(find(groundedice>0))=1;
 		groundedice(find(groundedice<0))=0;
 		floatingice=1-groundedice;
@@ -454,7 +587,7 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		end
 		thickness_gl=md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
 		lig_elem=compute_ligroundf(md.mesh.elements,md.mesh.x,md.mesh.y,gl_raw,thickness_gl,vxgl,vygl,md.materials.rho_ice);
-		ligroundf=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+		ligroundf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,lig_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_ligroundf uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
 		results.ligroundf(:,:,i)=transpose(ligroundf);
 		%--- flux fields for this output period: averaged over every raw solution
 		%    stored within it, rather than a single end-of-period snapshot ---
@@ -476,15 +609,27 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		else
 			meltfl = zeros(md.mesh.numberofvertices,1);   %floating basal melt not saved - treated as 0
 		end
-		bmb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
+		bmb=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,meltfl,xgrid,ygrid,NaN);
 		%libmassbffl's fill policy requires missing (not 0) outside floating ice.
 		%Multiplying by (1-groundedice) wrote a defined 0 there instead - mask to
 		%NaN explicitly so write_gridded_var converts it to _FillValue.
 		bmbval=-(transpose(bmb)*md.materials.rho_ice/md.constants.yts);
 		bmbval(transpose(groundedice)==1)=NaN;
 		results.bmb(:,:,i)=bmbval;
-		smb=InterpFromMeshToGrid(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
+		smb=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,smb_sum/nb,xgrid,ygrid,NaN);
 		results.smb(:,:,i)=transpose(smb)*md.materials.rho_ice/md.constants.yts;
+	end
+
+	%One summary warning for every "exceeds the 1e6 Pa checker cap" drag event accumulated
+	%above, instead of one warning per occurrence (see drag_cap_summary init above the loop).
+	if drag_cap_summary.noccurrences>0,
+		warning('md2ismip7:drag',['Basal drag exceeded the 1e6 Pa checker cap at ' num2str(drag_cap_summary.nvertices_total) ...
+			' vertex-timestep(s) across ' num2str(drag_cap_summary.noccurrences) ' of ' num2str(length(results.timegrid)) ...
+			' output period(s); all such vertices were masked to NaN rather than clamped. Worst case: vertex ' ...
+			num2str(drag_cap_summary.worst_vertex) ' (x=' num2str(drag_cap_summary.worst_x) ', y=' num2str(drag_cap_summary.worst_y) ...
+			') at time index ' num2str(drag_cap_summary.worst_time_index) ': ' num2str(drag_cap_summary.worst_value) ' Pa. C=' ...
+			num2str(drag_cap_summary.worst_C) ', N=' num2str(drag_cap_summary.worst_N) ' Pa, vel=' num2str(drag_cap_summary.worst_vel) ...
+			' m/yr - inspect the friction inversion/velocity solve there.']);
 	end
 	%}}}
 
@@ -551,10 +696,10 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	end
 
 	if is_historical,
-		warning('ISMIP7:placeholder',['These mandatory variables are not produced by this ' ...
-			'converter and are written as fill/NaN - populate before submission: licalvf, ' ...
-			'lifmassbf (gridded) and tendlicalvf, tendlifmassbf (scalar) - left at fill for ' ...
-			'this historical run since the front is prescribed.']);
+		warning('ISMIP7:placeholder',['licalvf, lifmassbf (gridded) and tendlicalvf, tendlifmassbf (scalar) ' ...
+			'are not produced by this converter for historical runs, since the front is prescribed ' ...
+			'(no calving law active) and these diagnostics are not physically meaningful - their ' ...
+			'.nc files are skipped entirely rather than written out at fill value.']);
 	end
 
 	%Columns: variable_id, standard_name, units, data, zero_outside_ice, is_flux
@@ -585,6 +730,9 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 	};
 
 	for v=1:size(grid_vars,1),
+		if is_historical && any(strcmp(grid_vars{v,1},{'licalvf','lifmassbf'})),
+			continue;
+		end
 		if grid_vars{v,6},
 			t=time_grid_flux; b=time_grid_flux_bnds;
 		else
@@ -592,6 +740,14 @@ function results=md2ismip7(md,directoryname,icesheetname,source_id,ism_id,ism_me
 		end
 		write_gridded_var(mkfname(grid_vars{v,1}),grid_vars{v,1},grid_vars{v,2},grid_vars{v,3},grid_vars{v,4},results.xcoord,results.ycoord,t,b,fillval,grid_vars{v,5},source_id,ism_id,icesheetname);
 	end
+
+function out=interp_quiet(elements,x,y,data,xgrid,ygrid,defaultvalue)
+	%interp_quiet - thin wrapper around InterpFromMeshToGrid that swallows the
+	%"interpolation progress: XX.XX%" line it prints on every call. The main loop above
+	%calls InterpFromMeshToGrid roughly 20 times per output period, so letting it print
+	%directly floods the console with uninformative lines; md2ismip7 prints its own
+	%one-line, per-period progress message instead (see the main loop above).
+	evalc('out=InterpFromMeshToGrid(elements,x,y,data,xgrid,ygrid,defaultvalue);');
 
 function ismip7_global_attributes(ncid,source_id,ism_id,domain_id)
 	%Mandatory ISMIP7 global attributes (see conventions section 5)
