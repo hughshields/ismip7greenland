@@ -267,9 +267,13 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 	%ISSM diagnostic family). TotalCalvingMeltingFluxLevelset is the COMBINED calving+melt flux,
 	%so the melt-only term is isolated by subtracting the calving-only total from it.
 	%Left at fill value for historical runs, where the front is prescribed (see is_historical above).
+	%NOTE: both Total* diagnostics use ISSM's 'positive = mass flux OUT through the front'
+	%convention (the same one compute_calvingflux mirrored before being negated above) - negate
+	%here too so tendlicalvf/tendlifmassbf (negative = mass lost) stay consistent with the sign
+	%of licalvf/lifmassbf, the gridded fields they are the spatial integral of.
 	if ~is_historical,
-		raw_calvtot      = arrayfun(@(k) md.results.TransientSolution(k).TotalCalvingFluxLevelset*10^12/md.constants.yts, 1:Nsol);
-		raw_frontmelttot = arrayfun(@(k) (md.results.TransientSolution(k).TotalCalvingMeltingFluxLevelset-md.results.TransientSolution(k).TotalCalvingFluxLevelset)*10^12/md.constants.yts, 1:Nsol);
+		raw_calvtot      = arrayfun(@(k) -md.results.TransientSolution(k).TotalCalvingFluxLevelset*10^12/md.constants.yts, 1:Nsol);
+		raw_frontmelttot = arrayfun(@(k) -(md.results.TransientSolution(k).TotalCalvingMeltingFluxLevelset-md.results.TransientSolution(k).TotalCalvingFluxLevelset)*10^12/md.constants.yts, 1:Nsol);
 	else
 		raw_calvtot      = NaN*ones(1,Nsol);  %tendlicalvf   - fill value (front prescribed)
 		raw_frontmelttot = NaN*ones(1,Nsol);  %tendlifmassbf - fill value (front prescribed)
@@ -565,9 +569,17 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 			vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
 			thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
 			[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
-			calving=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,calv_elem/md.constants.yts,xgrid,ygrid,NaN);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
+			%compute_calvingflux mirrors ISSM's Tria::CalvingFluxLevelset sign convention
+			%(positive = mass flux OUT through the ice front). licalvf/lifmassbf instead use
+			%the CF mass-balance convention their -10..0 kg m-2 s-1 allowed range implies
+			%(negative = mass lost), so the sign is flipped here before interpolation.
+			%licalvf/lifmassbf's fill_policy is 'forbidden' (defined over the whole grid, 0
+			%where not applicable) - like ligroundf below, default interp_quiet's output to 0
+			%rather than NaN for grid points outside the mesh footprint, so the checker's
+			%missing-value test is satisfied.
+			calving=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,-calv_elem/md.constants.yts,xgrid,ygrid,0);  %compute_calvingflux uses md.materials.rho_ice directly (no Gt scaling) - only /yts needed
 			results.calving(:,:,i)=transpose(calving);
-			frontmelt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,melt_elem/md.constants.yts,xgrid,ygrid,NaN);
+			frontmelt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,-melt_elem/md.constants.yts,xgrid,ygrid,0);
 			results.lifmassbf(:,:,i)=transpose(frontmelt);
 		end
 		mask=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,-md.mask.ice_levelset(1:md.mesh.numberofvertices),xgrid,ygrid,-1);
