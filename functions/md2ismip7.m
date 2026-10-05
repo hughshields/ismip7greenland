@@ -569,6 +569,15 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 			vy_calv    = md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices);
 			thickness_calv = md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices);
 			[calv_elem,melt_elem] = compute_calvingflux(md.mesh.elements,md.mesh.x,md.mesh.y,icels_calv,thickness_calv,crx_calv,cry_calv,mr_calv,vx_calv,vy_calv,md.materials.rho_ice);
+			%Clamp to outflow-only (>=0 in ISSM's positive-out convention, i.e. <=0 after the sign
+			%flip below). Calving and front melt cannot add mass; the few residual inward-signed
+			%elements (concave/kinked fronts, flow along the front, ill-defined melt direction where
+			%|v|~0) are numerical noise that otherwise fail the ISMIP7 max-value check (<= 0).
+			%Done per element, BEFORE interpolation, so interpolation cannot reintroduce positives.
+			%NOTE: gridded totals will be slightly more negative than tendlicalvf/tendlifmassbf,
+			%which are unclamped ISSM Total* diagnostics (~1% for front melt, negligible for calving).
+			calv_elem = max(calv_elem,0);
+			melt_elem = max(melt_elem,0);
 			%compute_calvingflux mirrors ISSM's Tria::CalvingFluxLevelset sign convention
 			%(positive = mass flux OUT through the ice front). licalvf/lifmassbf instead use
 			%the CF mass-balance convention their -10..0 kg m-2 s-1 allowed range implies
