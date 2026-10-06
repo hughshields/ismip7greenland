@@ -400,13 +400,6 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 	if ~has_vxavg,
 		warning('ISMIP7:novxavg','VxAverage/VyAverage not found in the solutions - using Vx/Vy directly for the grounding-line flux calculation (only correct for a depth-uniform/2D model).');
 	end
-	%Some setups leave md.basalforcings.geothermalflux as its uninitialized scalar NaN
-	%(or an all-NaN array) rather than a real per-vertex field - indexing that with
-	%(1:numberofvertices) errors outright. Treat a missing/all-NaN field as 0 instead.
-	geothermalflux_missing = all(isnan(md.basalforcings.geothermalflux(:)));
-	if geothermalflux_missing,
-		warning('ISMIP7:nogeoflux','md.basalforcings.geothermalflux is NaN - gridded geothermal flux (hfgeoubed) treated as 0.');
-	end
 	%ISMIP7 standard grid (ISMIP6 domain, EPSG:3413 for GrIS).
 	%Allowed resolutions (multiples of 1 km): 1/2/4/8/16 km.
 	posting = resolution_km*1000;
@@ -425,40 +418,30 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 	results.xcoord = results.gridx;              %x coordinate variable (ascending)
 	results.ycoord = results.gridy;              %y coordinate variable (ascending, matches data)
 
-	results.thickness= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.surface= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.bed= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.geoflux= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.smb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.bmb= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.dhdt= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vxsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vysurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vzsurf= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vxbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vybase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vzbase= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vxmean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.vymean= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.surftemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.basetemp= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.drag= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.calving= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.groundedice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.floatingice= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
-	results.mask= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.thickness= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.surface= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.bed= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.smb= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.bmb= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.dhdt= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vxmean= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.vymean= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.drag= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.calving= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.groundedice= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.floatingice= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
+	results.mask= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid)); %y,x,time
 
 	%Extra mandatory ISMIP7 fields handled outside the main per-timestep loop
-	results.base       = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
-	results.sftgif     = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
+	results.base       = NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 	%ligroundf: filled below in the per-timestep loops via compute_ligroundf, in every experiment.
 	%lifmassbf: filled below in the per-timestep loops from CalvingMeltingFluxLevelset-CalvingFluxLevelset
 	%           (non-historical only - stays fill value for historical/prescribed-front runs).
-	results.ligroundf  = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
-	results.lifmassbf  = NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
+	results.ligroundf  = NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid));
+	results.lifmassbf  = NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 	%libmassbfgr: set below (0 under grounded ice - this model has no grounded-ice basal
 	%melt/refreeze - fill value elsewhere) once sftgrf is available.
-	results.libmassbfgr= NaN*ones(numel(results.gridx),numel(results.gridy),length(results.timegrid));
+	results.libmassbfgr= NaN(numel(results.gridx),numel(results.gridy),length(results.timegrid));
 
 	%Accumulator for the "exceeds 1e6 Pa checker cap" drag warning: rather than firing a
 	%warning every time this happens (it can trigger on many vertices in many timesteps for a
@@ -485,39 +468,16 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 		results.surface(:,:,i)=transpose(surface);
 		bed=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.geometry.bed(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
 		results.bed(:,:,i)=transpose(bed);
-		if geothermalflux_missing,
-			geoflux_mesh = zeros(md.mesh.numberofvertices,1);
-		else
-			geoflux_mesh = md.basalforcings.geothermalflux(1:md.mesh.numberofvertices);
-		end
-		geoflux=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,geoflux_mesh,xgrid,ygrid,NaN);
-		results.geoflux(:,:,i)=transpose(geoflux);
 		if i==1,
 			dhdt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.geometry.thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-0),xgrid,ygrid,NaN);
 		else
 			dhdt=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,(md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)-md.results.TransientSolution(results.timegrid(i-1)).Thickness(1:md.mesh.numberofvertices))/(md.results.TransientSolution(results.timegrid(i)).time-md.results.TransientSolution(results.timegrid(i-1)).time),xgrid,ygrid,NaN);
 		end
 		results.dhdt(:,:,i)=transpose(dhdt)/(md.constants.yts);
-		vxsurf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-		results.vxsurf(:,:,i)=transpose(vxsurf)/md.constants.yts;
-		vysurf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-		results.vysurf(:,:,i)=transpose(vysurf)/md.constants.yts;
-		%vzsurf=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-		%results.vzsurf(:,:,i)=transpose(vzsurf)/md.constants.yts;
-		vxbase=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-		results.vxbase(:,:,i)=transpose(vxbase)/md.constants.yts;
-		vybase=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-		results.vybase(:,:,i)=transpose(vybase)/md.constants.yts;
-		%vzbase=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vz(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-		%results.vzbase(:,:,i)=transpose(vzbase)/md.constants.yts;
 		vxmean=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vx,xgrid,ygrid,NaN);
          results.vxmean(:,:,i)=transpose(vxmean)/md.constants.yts;
 		vymean=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.results.TransientSolution(results.timegrid(i)).Vy,xgrid,ygrid,NaN);
 		results.vymean(:,:,i)=transpose(vymean)/md.constants.yts;
-		surftemp=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(end-md.mesh.numberofvertices+1:end),xgrid,ygrid,NaN);
-		results.surftemp(:,:,i)=transpose(surftemp);
-		basetemp=interp_quiet(md.mesh.elements,md.mesh.x,md.mesh.y,md.initialization.temperature(1:md.mesh.numberofvertices),xgrid,ygrid,NaN);
-		results.basetemp(:,:,i)=transpose(basetemp);
 		%Effective pressure clamped at 0: right at flotation, floating-point roundoff
 		%produced tiny negative drag values that failed the ISMIP7 checker.
 		Neff_drag=max(md.constants.g*(md.materials.rho_ice*md.results.TransientSolution(results.timegrid(i)).Thickness(1:md.mesh.numberofvertices)+md.materials.rho_water*md.results.TransientSolution(results.timegrid(i)).Base(1:md.mesh.numberofvertices)),0);
