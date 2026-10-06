@@ -136,8 +136,8 @@ function results=md2ismip7(md,directoryname,source_id,ism_id,ism_member_id,forci
 			'ssp126',     'MRI',  'C006';
 			'ssp585',     'CESM', 'C007';
 			'ssp585',     'MRI',  'C008';
-			'ctrl2015',   'CESM', 'C009';
-			'ctrl2015',   'MRI',  'C010';
+			'ctrl',   'CESM', 'C009';
+			'ctrl',   'MRI',  'C010';
 		};
 		match = find(strcmpi(core_table(:,1),experiment_id) & strcmp(core_table(:,2),esmgroup));
 		if isempty(match),
