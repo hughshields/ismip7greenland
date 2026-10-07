@@ -143,3 +143,5 @@ Please complete the following table for your core experiments. This information 
 | Variable in data request not included, and reason | `licalvf`, `lifmassbf`, `tendlicalvf`, and `tendlifmassbf` are omitted in the historical runs, as the calving front is prescribed from observation (calving and frontal melt are not separated)| |
 | Number of days per year |365| |
 | Other comments | | |
+
+>See https://github.com/hughshields/ismip7greenland for run code.
